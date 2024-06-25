@@ -42,6 +42,10 @@ import optimizer.online_learners as ol
 import optimizer.benchmark as benchmark
 import optimizer.scheduler as scheduler
 import optimizer.optim as optim
+import optimizer.volumization as volumization
+
+import checkpoint
+
 
 sys.path.append('./minGPT')
 from mingpt.model import GPT as torch_GPT
@@ -314,8 +318,13 @@ def init_optimizer(
     grad_clip = optax.clip_by_global_norm(config.train.gradient_clip_val)
     optimizer = optax.chain(
         grad_clip,
-        optax.apply_if_finite(optimizer, 15)
+        optimizer
     )
+
+    if config.train.use_volumization:
+        optimizer = optax.chain(optimizer, volumization.volumize())
+
+    optimizer = optax.apply_if_finite(optimizer, 15)
 
     # Initialize opt_state
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
@@ -335,7 +344,7 @@ def init_aux_state(config: DictConfig, model: eqx.Module, opt_state: optax.OptSt
     else:
         random_scalar = opt_loggings["update/random_scaling"]
     loggings = {
-        "grads/norm": jnp.zeros([]),
+        "grads/l2-norm": jnp.zeros([]),
         "grads/l1-norm": jnp.zeros([]),
         "update/<gn, Delta(n)>": jnp.zeros([]),
         "update/<gn, Delta(n)>_sum": jnp.zeros([]),
@@ -348,6 +357,8 @@ def init_aux_state(config: DictConfig, model: eqx.Module, opt_state: optax.OptSt
         "grads/cos(gn, g(n-1))": jnp.zeros([]),
         "grads/cos(gn, g(1:n-1))": jnp.zeros([]),
         "grads/inf_grads": jnp.zeros([], jnp.int32),
+        "params/l2-norm": jnp.zeros([]),
+        "params/l1-onrm": jnp.zeros([])
     }
     loggings.update(opt_loggings)
     zeros = utils.zero_tree(eqx.filter(model, eqx.is_array))
@@ -384,8 +395,10 @@ def update_aux_state(
     key, new_key = jr.split(train_state.train_key)
     
     base_loggings = {
-        "grads/norm": utils.tree_l2_norm(grads),
+        "grads/l2-norm": utils.tree_l2_norm(grads),
         "grads/l1-norm": utils.tree_l1_norm(grads),
+        "params/l2-norm": utils.tree_l2_norm(train_state.model),
+        "params/l1-norm": utils.tree_l1_nonrm(train_state.model),
     }
     opt_loggings = utils.merge_dicts(*logstate.list_of_logs(opt_state))
     base_loggings.update(opt_loggings)
@@ -509,6 +522,11 @@ def train_step(
     log_data = train_state.aux_state.loggings
     return loss, accuracy, log_data, train_state
 
+def extract_structure(train_state: TrainState):
+    def get_type(p):
+        if eqx.is_array(p):
+            return (np.array(p.shape), p.dtype)
+        
 
 def save_checkpoint(path: str, train_state: TrainState) -> None:
     """Stores train_state to path."""
@@ -534,10 +552,10 @@ def train_loop(
     logger: RateLimitedWandbLog,
 ) -> TrainState:
     # Handling restarting from checkpoints.
-    save_checkpoint = config.checkpoint.save
+    do_save_checkpoint = config.checkpoint.save
     checkpoint_path = config.checkpoint.save_path
     num_steps = config.train.max_steps
-    if save_checkpoint:
+    if do_save_checkpoint:
         if checkpoint_path is None:
             raise ValueError("checkpoint.save_path cannot be empty.")
         checkpoint_path = os.path.join(os.getcwd(), "checkpoint", checkpoint_path)
@@ -641,8 +659,8 @@ def train_loop(
 
         # ======================================================================
         # Saving Checkpoint.
-        if save_checkpoint and train_state.iteration % config.checkpoint.save_steps == 0:
-            save_checkpoint(os.path.join(checkpoint_path, f"iter_{train_state.iteration}.json"), train_state)
+        if do_save_checkpoint and train_state.iteration % config.checkpoint.save_steps == 0:
+            checkpoint.save_checkpoint(os.path.join(checkpoint_path, f"iter_{train_state.iteration}"), train_state)
 
     return train_state
 

@@ -18,3 +18,6 @@ train:
   use_amp: True
   # value to cast to in mixed precision training.
   precision: float16
+
+  # whether to use volumization on the optimizer
+  use_volumization: True
