@@ -32,7 +32,6 @@ checkpoint/
 
 # other directories
 opt/
-mechanic.py
 trainer.py
 test.py
 # scc_setup.sh
