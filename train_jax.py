@@ -42,6 +42,8 @@ import optimizer.online_learners as ol
 import optimizer.benchmark as benchmark
 import optimizer.scheduler as scheduler
 import optimizer.optim as optim
+import optimizer.mechanic as mechanic
+import optimizer.volumization as volumization
 
 sys.path.append('./minGPT')
 from mingpt.model import GPT as torch_GPT
@@ -269,6 +271,7 @@ def init_optimizer(
             weight_decay=config.weight_decay
         )
 
+
     opt_config = config.optimizer
     if name == "adamw":
         optimizer = init_adamw(config=opt_config)
@@ -295,6 +298,14 @@ def init_optimizer(
             mu=opt_config.mu,
         )
 
+    if opt_config.mechanize:
+        mech_config = opt_config.mechanic
+        if opt_config.mechanize == 'optax_like':
+            optimizer = mechanic.optax_like_mechanize(
+                base_optimizer=optimizer,
+                **OmegaConf.to_container(mech_config)
+            )
+
     # Wrap online to non-convex.
     if name in ["ogd_md"]:
         wrap_o2nc = True
@@ -312,12 +323,19 @@ def init_optimizer(
         seed=config.train.random_scaling_seed   # TODO: deprecate. use PRNGKey passed from argument instead of random seed.
     )
     
+    if config.train.use_volumization:
+        optimizer = optax.chain(
+            optimizer,
+            volumization.volumize()
+        )
+    
     # Gradient clipping and finite gradient wrapper.
     grad_clip = optax.clip_by_global_norm(config.train.gradient_clip_val)
     optimizer = optax.chain(
         grad_clip,
         optax.apply_if_finite(optimizer, 15)
     )
+
 
     # Initialize opt_state
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))

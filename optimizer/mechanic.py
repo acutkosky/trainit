@@ -6,10 +6,11 @@ from jax import tree_util as jtu
 from jax import numpy
 from typing import NamedTuple, Any, Optional, List, Tuple
 from optax import tree_utils as optu
-import util
-import otnc
 import logstate
 
+
+def tree_copy(t):
+    return jtu.tree_map(jnp.copy, t)
 
 def tree_add(a, b):
     return jtu.tree_map(lambda a_i, b_i: a_i + b_i, a, b)
@@ -210,7 +211,7 @@ def optax_tuner(beta=1.0, eps=1e-8, num_iter=None, beta2=None):
     def init_fn(s_init: PyTree):
         state = OptaxTunerState(
             reward=optu.tree_zeros_like(s_init),
-            s_init=util.tree_copy(s_init),
+            s_init=tree_copy(s_init),
             max_grad=optu.tree_zeros_like(s_init),
             sum_squared_grad=optu.tree_zeros_like(s_init),
             iter_count=0,
@@ -490,6 +491,7 @@ def mechanize(
     freeze_s_iteration: Optional[int] = None,
     randomize_after_freeze: bool = False,
     tuner_decay_schedule="constant",
+    correct_volumization=False,
 ) -> optax.GradientTransformation:
     """
     Args:
@@ -516,6 +518,7 @@ def mechanize(
     tuner_decay_schedule: schedule to apply to the tuner updates. Can be:
         'constant' (no schedule)
         'linearl' (linear decay)
+    correct_volumization: if true, apply some changes to correct for use of volumization.
     """
 
     if tuner_decay_schedule == "constant":
@@ -603,19 +606,58 @@ def mechanize(
             next_offset = tree_add(offset, base_updates)
 
         if not per_layer:
+            #
+            # <g, |x0| P(x0 + s O) >
+            # < g, |x0| (I/|p| - pp^T/|p|^3) O >
+            # <g , O> |x0|/|p|  - <g, p> <p, O> |x0|/|p|^3
+            # <g, O> - <g, p> <p, O> /|p|^2
+
+            wd_grads = tree_add(
+                grads,
+                tree_scale(
+                    params,
+                    state.s
+                    * weight_decay
+                    * tree_norm(grads)
+                    / (tree_norm(params) +1e-8)
+                )
+            )
+
             inner_product = tree_dot(
                 offset,
-                tree_add(
-                    grads,
-                    tree_scale(
-                        params,
-                        state.s
-                        * weight_decay
-                        * tree_norm(grads)
-                        / (tree_norm(params) + 1e-8),
-                    ),
-                ),
+                wd_grads
             )
+            if correct_volumization:
+                def layer_level_dot(g, p, o):
+                    if p.ndim != 2:
+                        return 0.0
+                    else:
+                        p = p/(jnp.linalg.norm(p)+1e-8)
+                        return jnp.sum(g* p) * jnp.sum(p* o)
+                layer_corrections = jtu.tree_map(
+                    layer_level_dot,
+                    wd_grads,
+                    params,
+                    offset
+                )
+                layer_corrections = jtu.tree_reduce(lambda x, y: x+y, layer_corrections)
+
+                inner_product = inner_product - layer_corrections
+                
+
+            # inner_product = tree_dot(
+            #     offset,
+            #     tree_add(
+            #         grads,
+            #         tree_scale(
+            #             params,
+            #             state.s
+            #             * weight_decay
+            #             * tree_norm(grads)
+            #             / (tree_norm(params) + 1e-8),
+            #         ),
+            #     ),
+            # )
             reward_increment = inner_product * s
             next_incremental_variation = (
                 incremental_variation * use_incremental_variation + inner_product**2
