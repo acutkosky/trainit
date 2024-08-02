@@ -38,6 +38,121 @@ def tree_scale(t, s):
     return jtu.tree_map(lambda x: x * s, t)
 
 
+class ManyEtaMirrorDescentTunerState(NamedTuple):
+    sum_squared_grad: optax.Updates
+    iterates: optax.Updates
+    initial_magnitudes: optax.Updates
+    max_grad: optax.Updates
+    beta: float
+    lrs: jax.Array
+    init_wealth: float
+
+
+def  many_eta_mirror_descent_tuner(
+    lrs: Optional[list[float]] = None,
+    beta: float = 1.0,
+    innit_wealth: float = 1e-8,
+    small_value: float = 1e-6,
+    max_tuner_output: float = None,
+):
+    if lrs is None:
+        lrs = [4.0**(-i) for i in range(1, 5)]
+    lrs = jnp.array(lrs)
+
+
+    def init_fn(params: optax.Params):
+        state = MirrorDescentTunerState(
+            
+            sum_squared_grad=jtu.tree_map(
+                jnp.zeros_like, #lambda p: jnp.zeros((len(lrs), *p.shape)),
+                params),
+            iterates=jtu.tree_map(
+                lambda p: einops.repeat(p, '... -> ... n', n=len(lrs))/len(lrs),
+                params
+            ),
+            initial_magnitudes=jtu.tree_map(
+                lambda p: jnp.linalg.norm(p)/jnp.sqrt(p.numel),
+                params
+            ),
+            max_grad=jtu.tree_map(jnp.zeros_like, params),
+            beta=beta,
+            lrs=lrs,
+            init_wealth=init_wealth,
+        )
+        return state
+
+    def update_fn(
+        updates: optax.Updates, state: MirrorDescentTunerState, params: optax.Params
+    ):
+        sum_squared_grad = state.sum_squared_grad
+        iterates = state.iterates
+        max_grad = state.max_grad
+        iter_count = state.iter_count
+        initial_magnitudes = state.initial_magnitudes
+        beta = state.beta
+        lrs = state.lrs
+        init_wealth = state.init_wealth
+
+        clipped_updates = updates
+
+        next_sum_squared_grad = jtu.tree_map(
+            lambda sum_i, u_i: beta**2 * sum_i + u_i**2, sum_squared_grad, updates
+        )
+        next_max_grad = jtu.tree_map(
+            lambda m_i, u_i: jnp.maximum(beta * m_i, jnp.abs(u_i)), max_grad, updates
+        )
+
+        def get_alpha(v, m):
+            return m*jnp.sqrt((1-beta**iter_count)/(iter_count * v * (1-beta)))
+
+
+        alpha = jtu.tree_map(
+            get_alpha,
+            next_sum_squared_grad,
+            initial_magnitudes
+        )
+        def link_fn(theta, V, M, init_i):
+            V = V + small_value
+            M = M + small_value
+            return init_i * jnp.exp(theta / jnp.sqrt(V))
+
+        def inv_link_fn(w, alpha_i):
+            # lrs is [N]
+            # w is [..., N]
+            # alpha is [1]
+            theta = 2 * jnp.sign(w) * jnp.log(jnp.abs(w)/alpha + 1) / lrs # [..., N] / [N] -> [..., N]
+            V = V + small_value
+            M = M + small_value
+            return jnp.log(p / init_i) * jnp.sqrt(V)
+
+        def get_next_param(p_i, init_i, u_i, old_sum_i, next_sum_i, m_i):
+            old_theta = inv_link_fn(p_i, next_sum_i, m_i, init_i)
+            theta = beta * old_theta - u_i  # - u_i**2/jnp.sqrt(next_sum_i)
+            next_p_i = link_fn(theta, next_sum_i, m_i, init_i)
+            next_p_i = jnp.clip(next_p_i, a_min=init_i, a_max=max_tuner_output)
+            return next_p_i
+
+        next_params = jtu.tree_map(
+            get_next_param,
+            params,
+            initial_value,
+            clipped_updates,
+            sum_squared_grad,
+            next_sum_squared_grad,  # clipped_updates, sum_squared_grad
+            next_max_grad,
+        )
+
+        next_updates = tree_subtract(next_params, params)
+        next_state = MirrorDescentTunerState(
+            sum_squared_grad=next_sum_squared_grad,
+            initial_value=initial_value,
+            max_grad=next_max_grad,
+        )
+
+        return next_updates, next_state
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
 class MirrorDescentTunerState(NamedTuple):
     sum_squared_grad: optax.Updates
     initial_value: optax.Params
