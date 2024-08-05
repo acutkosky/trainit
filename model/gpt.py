@@ -13,11 +13,15 @@ from jax import numpy as jnp
 import equinox as eqx
 from equinox import nn
 from jax import random as jr
+from jax import tree_util as jtu
 from typing import Union, Optional, Sequence
 
 from jax import named_scope
+
 # from jax.random import PRNGKeyArray
 from jax import Array as PRNGKeyArray
+from omegaconf import DictConfig
+from optimizer.quantize import differentiable_sign
 
 
 class CausalSelfAttention(eqx.Module):
@@ -132,14 +136,14 @@ class TransformerBlock(eqx.Module):
         # The best reference I can find for the MLP using 4x the input dim as
         # the intermediate layer is [Att]
         #
-        out = self.ln1(data)                    # [L, D]
-        out = self.attn(out, key=key)           # [L, D]
-        post_attn = data + out                  # [L, D]
-        out = self.ln2(post_attn)               # [L, D]
-        out = jax.vmap(self.expand_fc)(out)     # [L, D] -> [D] with vmap over L -> [L, D]
-        out = jax.nn.gelu(out)                  # [L, D]
-        out = jax.vmap(self.reduce_fc)(out)     # [L, D] -> [D] with vmap over L -> [L, D]
-        out = post_attn + out                   # [L, D]
+        out = self.ln1(data)  # [L, D]
+        out = self.attn(out, key=key)  # [L, D]
+        post_attn = data + out  # [L, D]
+        out = self.ln2(post_attn)  # [L, D]
+        out = jax.vmap(self.expand_fc)(out)  # [L, D] -> [D] with vmap over L -> [L, D]
+        out = jax.nn.gelu(out)  # [L, D]
+        out = jax.vmap(self.reduce_fc)(out)  # [L, D] -> [D] with vmap over L -> [L, D]
+        out = post_attn + out  # [L, D]
 
         return out
 
@@ -152,12 +156,14 @@ class GPT(eqx.Module):
     position_embedding: eqx.Module
     ln: AxisLayerNorm
     head: nn.Linear
+    config: DictConfig = eqx.field(static=True)
 
     def __init__(self, vocab_size, config, *, key: PRNGKeyArray):
         # self.config = config
 
         sequential_key, token_key, position_key, head_key = jr.split(key, 4)
         sequential_key = jr.split(sequential_key, config.num_blocks)
+        self.config = config
 
         self.vocab_size = vocab_size
         self.context_length = config.context_length
@@ -179,11 +185,38 @@ class GPT(eqx.Module):
             config.dim, self.vocab_size, use_bias=config.bias, key=head_key
         )
 
+    def quantize(self):
+        quant_config = self.config.quantize
+
+        def where(t):
+            excludes = [
+                t.head.weight,
+                t.token_embedding.weight,
+                t.position_embedding.weight,
+            ]
+            return [l for l in jtu.tree_leaves(t) if l not in excludes]
+
+        def replace_fn(x):
+            if not eqx.is_array(x):
+                return x
+            if x.ndim < 2:
+                return x
+            result = differentiable_sign(x, rms_scale=quant_config.rms_scale)
+            if quant_config.dim_scale:
+                result = result / x.shape[1]
+            return result
+
+        return eqx.tree_at(where=where, pytree=self, replace_fn=replace_fn)
+
     @named_scope("gpt.GPT")
     def __call__(self, token_indices, *, key: Optional[PRNGKeyArray] = None):
         """
         token indices will be shape [L] - we will vmap over the batch dimension.
         """
+
+        if self.config.do_quantize:
+            print("quantizing...")
+            return self.quantize()(token_indices, key=key)
 
         L = len(token_indices)
         assert L <= self.context_length
@@ -194,16 +227,18 @@ class GPT(eqx.Module):
         # No idea if current GPT-4 type stuff does more fancy things, but even
         # the results in [GPT3] looked amazing.
 
-        tokens = jax.vmap(self.token_embedding, in_axes=0, out_axes=0)(token_indices)  # [L, D]
+        tokens = jax.vmap(self.token_embedding, in_axes=0, out_axes=0)(
+            token_indices
+        )  # [L, D]
         positions = self.position_embedding.weight[:L, :]  # [L, D]
         data = tokens + positions
-        out = self.blocks(data,  key=key)
+        out = self.blocks(data, key=key)
 
         # [GPT2] says to add an extra layer normalization after the transformer
         # blocks. [GPT3] doesn't really say to change anything - it just makes
         # the model bigger.
         out = self.ln(out)
 
-        logits = jax.vmap(self.head)(out)   # [L, D] -> vmap over L -> [L, D]
+        logits = jax.vmap(self.head)(out)  # [L, D] -> vmap over L -> [L, D]
 
         return logits

@@ -5,6 +5,9 @@ import jax
 from jax import named_scope
 from jax import numpy as jnp
 from jax import random as jr
+from jax import tree_util as jtu
+
+from optimizer.quantize import differentiable_sign
 
 import equinox as eqx
 from equinox import nn
@@ -15,6 +18,7 @@ import torch
 from typing import Union, Optional, Sequence, Literal
 from jaxtyping import Array, PRNGKeyArray
 import re
+from omegaconf import DictConfig
 
 
 StateDict = dict[str, torch.Tensor]
@@ -181,6 +185,7 @@ class GPT(eqx.Module):
     transformer_blocks: eqx.Module
     ln: nn.LayerNorm
     head: nn.Linear
+    config: DictConfig = eqx.field(static=True)
 
     def __init__(self, vocab_size, config, state_dict: Optional[StateDict] = None, *, key: Optional[PRNGKeyArray] = None):
         """Initializes GPT model based on config.
@@ -200,6 +205,7 @@ class GPT(eqx.Module):
             However, the extended Linear and LayerNorm checks dimensionality.
         """
         self.context_length = config.context_length
+        self.config = config
 
         if state_dict is None:
             self._init_default(vocab_size, config, key=key)
@@ -254,9 +260,31 @@ class GPT(eqx.Module):
         self.ln = enn.LayerNorm(weight=get_params("transformer.ln_f.weight"), bias=get_params("transformer.ln_f.bias"))
         self.head = enn.Linear(weight=get_params("lm_head.weight"))
 
+    def quantize(self):
+        quant_config = self.config.quantize
+
+        def where(t):
+            return jtu.tree_leaves(t.transformer_blocks) + jtu.tree_leaves(t.ln)
+
+        def replace_fn(x):
+            if not eqx.is_array(x):
+                return x
+            if x.ndim < 2:
+                return x
+            result = differentiable_sign(x, rms_scale=quant_config.rms_scale)
+            if quant_config.dim_scale:
+                result = result / x.shape[1]
+            return result
+
+        return eqx.tree_at(where=where, pytree=self, replace_fn=replace_fn)
+
     @named_scope("gpt2.GPT")
-    def __call__(self, input, *, key: PRNGKeyArray):
+    def __call__(self, input, *, key: PRNGKeyArray, is_quantized=False):
         """input is single input, a [L,] sequence of tokenized sentence."""
+
+        if not is_quantized and self.config.do_quantize:
+            print("quantizing...")
+            return self.quantize()(input, key=key, is_quantized=True)
         L = len(input)
         assert L <= self.context_length, f"Input size {L} exceeds context length{self.context_length}."
 

@@ -18,3 +18,9 @@ head_bias: False          # whether the final linear (head) layer of GPT uses bi
 
 # EXPERIMENTAL: whether to load weights from pytorch initialization.
 load_pytorch: False
+
+do_quantize: False
+
+quantize:
+  rms_scale: True
+  dim_scale: False

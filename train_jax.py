@@ -376,7 +376,7 @@ def update_aux_state(
     global_config = config
     config = config.logging
     if not config.log_callback_data:
-        return None
+        return train_state
     
     model = eqx.apply_updates(
         train_state.model, utils.negative_tree(updates))    # x_n
