@@ -46,6 +46,7 @@ import optimizer.volumization as volumization
 
 import checkpoint
 
+import optimizer.mechanic as mechanic
 
 sys.path.append('./minGPT')
 from mingpt.model import GPT as torch_GPT
@@ -53,6 +54,8 @@ from mingpt.model import GPT as torch_GPT
 import random
 import numpy as np
 import torch
+
+import serialize.serializer as serializer
 
 
 class AuxState(NamedTuple):
@@ -271,6 +274,7 @@ def init_optimizer(
             weight_decay=config.weight_decay
         )
 
+
     opt_config = config.optimizer
     if name == "adamw":
         optimizer = init_adamw(config=opt_config)
@@ -297,6 +301,14 @@ def init_optimizer(
             mu=opt_config.mu,
         )
 
+    if opt_config.mechanize:
+        mech_config = opt_config.mechanic
+        if opt_config.mechanize == 'optax_like':
+            optimizer = mechanic.optax_like_mechanize(
+                base_optimizer=optimizer,
+                **OmegaConf.to_container(mech_config)
+            )
+
     # Wrap online to non-convex.
     if name in ["ogd_md"]:
         wrap_o2nc = True
@@ -313,6 +325,12 @@ def init_optimizer(
         random_scaling=config.train.random_scaling,
         seed=config.train.random_scaling_seed   # TODO: deprecate. use PRNGKey passed from argument instead of random seed.
     )
+    
+    if config.train.use_volumization:
+        optimizer = optax.chain(
+            optimizer,
+            volumization.volumize()
+        )
     
     # Gradient clipping and finite gradient wrapper.
     grad_clip = optax.clip_by_global_norm(config.train.gradient_clip_val)
@@ -528,20 +546,6 @@ def extract_structure(train_state: TrainState):
             return (np.array(p.shape), p.dtype)
         
 
-def save_checkpoint(path: str, train_state: TrainState) -> None:
-    """Stores train_state to path."""
-    with open(path, 'wb') as f:
-        eqx.tree_serialise_leaves(f, train_state)
-    print(f"Successfully saved checkpoint to {path}")
-
-
-def load_checkpoint(path: str, structure: TrainState) -> TrainState:
-    """Loads and returns train_state from path."""
-    with open(path, 'rb') as f:
-        train_state = eqx.tree_deserialise_leaves(f, structure)
-    print(f"Successfully loaded checkpoint from {path}")
-    return train_state
-
 
 def train_loop(
     train_state: TrainState,
@@ -558,7 +562,7 @@ def train_loop(
     if do_save_checkpoint:
         if checkpoint_path is None:
             raise ValueError("checkpoint.save_path cannot be empty.")
-        checkpoint_path = os.path.join(os.getcwd(), "checkpoint", checkpoint_path)
+        # checkpoint_path = os.path.join(os.getcwd(), "saved_checkpoints", checkpoint_path)
         if not os.path.exists(checkpoint_path):
             raise ValueError(f"checkpoint path {checkpoint_path} does not exist.")
         if config.checkpoint.num_steps is not None:
@@ -660,7 +664,7 @@ def train_loop(
         # ======================================================================
         # Saving Checkpoint.
         if do_save_checkpoint and train_state.iteration % config.checkpoint.save_steps == 0:
-            checkpoint.save_checkpoint(os.path.join(checkpoint_path, f"iter_{train_state.iteration}"), train_state)
+            serializer.save(os.path.join(checkpoint_path, f"iter_{train_state.iteration}.ckpt"), train_state)
 
     return train_state
 
@@ -706,10 +710,9 @@ def train(config: DictConfig):
     # Load train state from checkpoint.
     if config.checkpoint.load:
         checkpoint_path = config.checkpoint.load_path
-        checkpoint_path = os.path.join(os.getcwd(), "checkpoint", checkpoint_path)
         if not os.path.exists(checkpoint_path):
             raise ValueError(f"checkpoint path {checkpoint_path} does not exist.")
-        train_state = load_checkpoint(checkpoint_path, train_state)
+        train_state = serializer.load(checkpoint_path, train_state)
 
     time_keeper = TimeKeeper()
 
@@ -738,7 +741,6 @@ def init_config(config: DictConfig) -> DictConfig:
         checkpoint_path = config.checkpoint.save_path
         if checkpoint_path is None:
             raise ValueError("checkpoint.save_path cannot be empty.")
-        checkpoint_path = os.path.join(os.getcwd(), 'checkpoint', checkpoint_path)
         config_path = os.path.join(checkpoint_path, 'config.yaml')
         if not os.path.exists(checkpoint_path):
             # Create checkpoint directory.

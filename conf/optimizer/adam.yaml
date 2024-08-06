@@ -9,3 +9,22 @@ beta2: 0.999
 weight_decay: 0.0
 debias_beta1: True
 debias_beta2: True
+
+
+mechanize: optax_like
+mechanic:
+  s_init: 1e-8
+  betas:
+    - 0.9
+    - 0.99
+    - 0.999
+    - 0.9999
+    - 0.99999
+    - 0.999999
+  weight_decay: 0.0
+  incremental: False
+  randomize_incremental: False
+  use_incremental_variation: False
+  betas2: null
+  num_iter: null
+  correct_volumization: False

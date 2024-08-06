@@ -24,7 +24,7 @@ outputs/
 wandb/
 
 # batch job and output files
-batch_job/
+# batch_job/
 *.sh.*
 
 # checkpoint files
@@ -32,7 +32,6 @@ checkpoint/
 
 # other directories
 opt/
-mechanic.py
 trainer.py
 test.py
 # scc_setup.sh
