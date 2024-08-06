@@ -322,7 +322,7 @@ def init_optimizer(
     )
 
     if config.train.use_volumization:
-        optimizer = optax.chain(optimizer, volumization.volumize())
+        optimizer = optax.chain(optimizer, volumization.volumize(**OmegaConf.to_container(config.train.volumization_opts)))
 
     optimizer = optax.apply_if_finite(optimizer, 15)
 

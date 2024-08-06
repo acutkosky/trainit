@@ -21,3 +21,8 @@ train:
 
   # whether to use volumization on the optimizer
   use_volumization: True
+
+  volumization_opts:
+    params_to_volumize: null
+    eps: 1e-8
+    stay_on_sphere: false
