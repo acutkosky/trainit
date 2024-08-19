@@ -1,6 +1,6 @@
 name: adamw
 lr_config:
-  lr: 3e-4
+  lr: 1.0 #3e-4
   schedule: linear
   warmup: 5000
   max_steps: 50000
@@ -9,6 +9,32 @@ beta2: 0.999
 weight_decay: 0.0
 debias_beta1: True
 debias_beta2: True
+
+
+# whether to use volumization on the optimizer
+use_volumization: False
+use_corrected_volumization: True
+
+corrected_volumization_opts:
+  always_correct: False
+
+correct_projections: False
+
+correct_projection_opts:
+  per_layer: True
+  spherical: True
+  ord: 2
+  per_layer_matrices_only: True
+
+random_scale: False
+random_scale_opts:
+  key: 12123
+  distribution: exponential
+
+volumization_opts:
+  params_to_volumize: null
+  eps: 1e-8
+  stay_on_sphere: True
 
 
 mechanize: optax_like
@@ -28,3 +54,14 @@ mechanic:
   betas2: null
   num_iter: null
   correct_volumization: False
+  recompute_offset: False
+  constrain_base_offset_l2: null #update_norm_sqrt_scale #1e6
+  constrain_base_offset_linf: null
+  memory_efficient_update: False
+
+
+optax_mechanic_config:
+  s_init: 1e-8
+  eps: 1e-8
+  num_betas: 6
+  weight_decay: 0.0

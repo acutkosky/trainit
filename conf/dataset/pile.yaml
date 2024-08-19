@@ -2,7 +2,7 @@ name: pile
 
 # number of examples placed on each GPU. 
 # will be overwritten if use_loadit is true.
-batch_size: 4 
+batch_size: 4
 
 # shuffle buffer for data loader. 0 means no shuffle.
 shuffle_buffer_size: 10000

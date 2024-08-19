@@ -51,7 +51,7 @@ class ManyEtaMirrorDescentTunerState(NamedTuple):
 def  many_eta_mirror_descent_tuner(
     lrs: Optional[list[float]] = None,
     beta: float = 1.0,
-    innit_wealth: float = 1e-8,
+    init_wealth: float = 1e-8,
     small_value: float = 1e-6,
     max_tuner_output: float = None,
 ):
@@ -483,6 +483,7 @@ def add_optimizers(optimizers: Tuple[optax.GradientTransformation]):
 
 class MechanicState(NamedTuple):
     offset: optax.Updates  # this is the Delta in the paper.
+    initial_params: optax.Params # either this or offset is None.
     base_state: optax.OptState
     tuner_state: optax.OptState
     s: jax.Array
@@ -493,6 +494,7 @@ class MechanicState(NamedTuple):
     iter_count: jax.Array
     update_count: jax.Array
     logging: logstate.Log
+    sum_squared_update_l2_norm: jax.Array
 
 
 def mechanize_single_beta(
@@ -607,6 +609,10 @@ def mechanize(
     randomize_after_freeze: bool = False,
     tuner_decay_schedule="constant",
     correct_volumization=False,
+    recompute_offset=True,
+    constrain_base_offset_l2=None,
+    constrain_base_offset_linf=None,
+    memory_efficient_update=True,
 ) -> optax.GradientTransformation:
     """
     Args:
@@ -634,6 +640,10 @@ def mechanize(
         'constant' (no schedule)
         'linearl' (linear decay)
     correct_volumization: if true, apply some changes to correct for use of volumization.
+    recompute_offset: if true, don't use the stored offset - instead recompute it from the params
+      and initial value.
+    constrain_base_offset_l2: if not None, constrain the base offset to this l2 norm.
+    constrain_base_offst_linf: if  not None, constrain the base offset to this linf norm.
     """
 
     if tuner_decay_schedule == "constant":
@@ -651,7 +661,15 @@ def mechanize(
         )
 
     def init_fn(params: optax.Params):
-        offset = jtu.tree_map(jnp.zeros_like, params)
+        if recompute_offset:
+            initial_params = jtu.tree_map(jnp.array, params)
+            offset = None
+        else:
+            initial_params = None
+            offset = jtu.tree_map(jnp.zeros_like, params)
+        if not memory_efficient_update:
+            initial_params = jtu.tree_map(jnp.array, params)
+            offset = jtu.tree_map(jnp.zeros_like, params)
         base_state = base_optimizer.init(params)
         if not per_layer:
             s = jnp.array(s_init)
@@ -665,6 +683,7 @@ def mechanize(
             incremental_sum = 0.0
         return MechanicState(
             offset=offset,
+            initial_params=initial_params,
             base_state=base_state,
             tuner_state=tuner_state,
             s=s,
@@ -674,6 +693,7 @@ def mechanize(
             incremental_sum=incremental_sum,
             update_count=0,
             iter_count=0,
+            sum_squared_update_l2_norm=0.0,
             logging=logstate.Log(
                 {
                     "reward": 0.0,
@@ -681,10 +701,17 @@ def mechanize(
                     "mechanic/max_s": 0.0,
                     "mechanic/min_s": 0.0,
                     "mechanic/tuner_update_count": 0,
+                    "mechanic/base_update_norm": 0.0,
                     "mechanic/incremental_variation": 0.0,
                     "mechanic/incremental_sum": 0.0,
+                    "mechanic/next_offset_norm": 0.0,
                     "mechanic/offset_norm": 0.0,
-                    "mechanic/scaled_offset_norm": 0.0,
+                    "mechanic/scaled_next_offset_norm": 0.0,
+                    "mechanic/s_avg": 0.0,
+                    "mechanic/reward_increment": 0.0,
+                    "mechanic/inner_product": 0.0,
+                    "mechanic/inner_product_cos": 0.0,
+                    "mechanic/sqrt_sum_squared_update_l2_norm": 0.0,
                 }
             ),
         )
@@ -695,6 +722,7 @@ def mechanize(
         params: Optional[optax.Params] = None,
     ):
         offset = state.offset
+        initial_params = state.initial_params
         base_state = state.base_state
         tuner_state = state.tuner_state
         s = state.s
@@ -706,6 +734,28 @@ def mechanize(
         prev_random_scale = state.prev_random_scale
         update_count = state.update_count
         iter_count = state.iter_count
+        sum_squared_update_l2_norm = state.sum_squared_update_l2_norm
+
+        if recompute_offset:
+            offset = optu.tree_scalar_mul(1.0/s, optu.tree_sub(params, initial_params))
+
+        if constrain_base_offset_l2 is not None:
+            if constrain_base_offset_l2 == 'param_norm':
+                max_norm = optu.tree_l2_norm(params)
+            elif constrain_base_offset_l2 == 'param_norm_sqrt_scale':
+                max_norm = optu.tree_l2_norm(params) * jnp.sqrt(iter_count + 1.0)
+            elif constrain_base_offset_l2 == 'update_norm_sqrt_scale':
+                max_norm = jnp.sqrt(sum_squared_update_l2_norm)
+            else:
+                max_norm = constrain_base_offset_l2
+            offset_norm = optu.tree_l2_norm(offset) + 1e-8
+            offset = optu.tree_scalar_mul(jnp.minimum(1.0, max_norm/offset_norm), offset)
+
+        if  constrain_base_offset_linf is not None:
+            offset = jtu.tree_map(
+                lambda o: jnp.clip(o, -constrain_base_offset_linf, constrain_base_offset_linf),
+                offset
+            )
 
         if randomize_incremental:
             random_scale = jax.random.exponential(to_use)
@@ -713,6 +763,8 @@ def mechanize(
             random_scale = 1.0
 
         base_updates, next_base_state = base_optimizer.update(grads, base_state, params)
+
+        next_sum_squared_update_l2_norm = sum_squared_update_l2_norm + optu.tree_l2_norm(base_updates, squared=True)
         # base updates is "u" in the paper. Add this to Delta to get the next
         # value of Delta.
         if incremental:
@@ -870,7 +922,7 @@ def mechanize(
         max_s = jtu.tree_reduce(lambda a, b: jnp.maximum(a, b), next_s)
         min_s = jtu.tree_reduce(lambda a, b: jnp.minimum(a, b), next_s)
 
-        def compute_update_global(base_i, next_offset_i, offset_i):
+        def compute_update_global(base_i, next_offset_i, offset_i, params_i, init_params_i):
             if incremental:
                 # update to  apply if we are still updating s
                 standard_update = base_i * next_s * random_scale
@@ -898,9 +950,16 @@ def mechanize(
                     avmom = averaging_momentum
 
                 # update to  apply if we are still updating s
-                standard_update = (
-                    base_i * s + next_offset_i * s_update + offset_i * s * avmom
-                )
+                if memory_efficient_update:
+                    standard_update = (
+                        base_i * s + next_offset_i * s_update + offset_i * s * avmom
+                    )
+                else:
+                    standard_update = (
+                        next_offset_i * next_s + init_params_i - params_i
+                    )
+
+                
 
                 # update to apply if we have stopped updating s
                 frozen_update = base_i * s + offset_i * s * avmom
@@ -913,20 +972,23 @@ def mechanize(
                 return standard_update
 
         def compute_update_per_layer(
-            base_i, next_offset_i, old_s_i, next_s_i, s_update_i
+            base_i, next_offset_i, old_s_i, next_s_i, s_update_i, params_i, init_params_i
         ):
             if incremental:
                 return base_i * next_s_i * random_scale
             else:
-                return base_i * old_s_i + next_offset_i * s_update_i
+                if memory_efficient_update:
+                    return base_i * old_s_i + next_offset_i * s_update_i
+                else:
+                    return init_params_i + next_s_i * next_offset_i - params_i
 
         if per_layer:
             updates = jtu.tree_map(
-                compute_update_per_layer, base_updates, next_offset, s, next_s, s_update
+                compute_update_per_layer, base_updates, next_offset, s, next_s, s_update, params, initial_params
             )
         else:
             updates = jtu.tree_map(
-                compute_update_global, base_updates, next_offset, offset
+                compute_update_global, base_updates, next_offset, offset, params, initial_params
             )
 
         if per_layer:
@@ -935,8 +997,13 @@ def mechanize(
             )
         else:
             scaled_offset_norm = next_s * tree_norm(next_offset)
+
+        
+        inner_product_log = jnp.mean(optu.tree_sum(inner_product))
+        inner_product_cos_log = jnp.mean(optu.tree_sum(inner_product))/(1e-8 + optu.tree_l2_norm(offset)*optu.tree_l2_norm(wd_grads))
         next_state = MechanicState(
-            offset=next_offset,
+            offset=None if recompute_offset else next_offset,
+            initial_params=initial_params,
             base_state=next_base_state,
             tuner_state=next_tuner_state,
             s=next_s,
@@ -946,6 +1013,7 @@ def mechanize(
             incremental_sum=next_incremental_sum,
             update_count=next_update_count,
             iter_count=iter_count + 1,
+            sum_squared_update_l2_norm=next_sum_squared_update_l2_norm,
             logging=logstate.Log(
                 {
                     "reward": reward + reward_increment,
@@ -953,10 +1021,17 @@ def mechanize(
                     "mechanic/max_s": max_s,
                     "mechanic/min_s": min_s,
                     "mechanic/tuner_update_count": next_update_count,
+                    "mechanic/base_update_norm": tree_norm(base_updates),
                     "mechanic/incremental_variation": log_next_incremental_variation,
                     "mechanic/incremental_sum": tree_norm(log_next_incremental_sum),
-                    "mechanic/offset_norm": tree_norm(next_offset),
-                    "mechanic/scaled_offset_norm": scaled_offset_norm,
+                    "mechanic/next_offset_norm": tree_norm(next_offset),
+                    "mechanic/offset_norm": 0.0 if recompute_offset else tree_norm(offset),
+                    "mechanic/scaled_next_offset_norm": scaled_offset_norm,
+                    "mechanic/s_avg": jnp.mean(next_s),
+                    "mechanic/reward_increment": jnp.mean(reward_increment),
+                    "mechanic/inner_product": inner_product_log,
+                    "mechanic/inner_product_cos": inner_product_cos_log,
+                    "mechanic/sqrt_sum_squared_update_l2_norm": jnp.sqrt(next_sum_squared_update_l2_norm),
                 }
             ),
         )

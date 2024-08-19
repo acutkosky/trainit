@@ -12,14 +12,14 @@ logging:
   # you can save memory/computation by turning off each of the following configurations.
   # *In terms of memory cost:
   # stores the last gradient g(n-1)
-  store_last_grads: True
+  store_last_grads: False #True
   # stores the sum of past gradients g(1:n-1)
-  store_past_grads: True
+  store_past_grads: False #True
   # stores the change in parameter x(n) - x(n-1)
-  store_last_params: True
+  store_last_params: False #True
   # *In terms of computation cost:
   # computes f(x(n-1), zn), which costs an additional forward pass
-  compute_last_loss: True
+  compute_last_loss: False #True
   # computes g(x(n-1), zn), which costs an additional forward and backward pass
   compute_last_grads: False
 
