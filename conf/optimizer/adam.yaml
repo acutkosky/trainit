@@ -7,3 +7,9 @@ beta1: 0.9
 beta2: 0.999
 eps: 1e-8
 weight_decay: 0.1
+inner_eps: 0.0
+# debias_beta1: True
+# debias_beta2: True
+# use_momentum: True
+# use_preconditioning: True
+# decouple_weight_decay: False

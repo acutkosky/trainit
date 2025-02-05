@@ -1,0 +1,19 @@
+name: prec_adam
+defaults: 
+  - lr_config: linear
+b1: 0.9
+b2: 0.999
+b3: 0.999
+pre_diag: 0.0
+post_diag: 0.0
+pre_matrix_diag: 0.0
+do_matrix: True
+weight_decay: 0.1
+eps: 1.0
+solver: 'solve'
+eps_type: 'norm'
+threshold: 4096
+inner_eps: 1e-8
+outer_eps: 0.0
+offset_beta: 1.0
+wd: 0.0

@@ -24,6 +24,7 @@ class AdamBaseState(NamedTuple):
     log_metrics: Optional[log_utils.Log]
 
 
+<<<<<<< HEAD
 def adam_base(
         learning_rate: optax.ScalarOrSchedule = 1e-4,
         beta1: float = 0.9,
@@ -38,6 +39,7 @@ def adam_base(
         use_momentum_state: bool = True,
         use_precond: bool = True,
         use_precond_state: bool = True,
+        inner_eps: float=0.0,
         logger: Optional[Logger] = None,
 ) -> optax.GradientTransformation:
     """The base Adam optimizer.
@@ -153,7 +155,7 @@ def adam_base(
         # Compute one-step update: -eta * [mu / (eps+sqrt(nu)) + lam * params]
         if use_precond:
             updates = jtu.tree_map(
-                lambda m, v: m / (jnp.sqrt(v) + eps), mu_hat, nu_hat)
+                lambda m, v: m / (jnp.sqrt(v + inner_eps) + eps), mu_hat, nu_hat)
         else:
             updates = mu_hat
 

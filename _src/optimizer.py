@@ -6,10 +6,15 @@ import jax.random as jr
 import optax
 import optimizers
 import equinox as eqx
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from typing import Any, Tuple
 from jaxtyping import PRNGKeyArray
 
+
+import sys
+sys.path.append('/projectnb/aclab/cutkosky/jaxol')
+import jaxol.default as precond
+import jaxol.prec_adam as prec_adam
 
 def init_schedule(lr_config: DictConfig) -> optax.ScalarOrSchedule:
     """Parses the config and initializes a learning rate scheduler.
@@ -51,7 +56,7 @@ def init_schedule(lr_config: DictConfig) -> optax.ScalarOrSchedule:
             const_steps=const_steps,
             total_steps=config.max_steps,
             init_value=0.0,
-            end_value=0.0,
+            end_value=connfig.end_value,
         )
         return learning_rate
     
@@ -108,7 +113,6 @@ def wrap_scheduler(
             jax.experimental.io_callback(wandb_log, None, {f"lr/{title}": lr}, commit=False)
         return lr
     return jtu.Partial(wrapper, learning_rate, wandb_log=wandb_log, title=schedule_title)
-
 
 def init_optimizer(
     model: eqx.Module,
@@ -191,6 +195,8 @@ def init_optimizer(
             eps=config.eps,
             weight_decay=config.weight_decay,
             decouple_weight_decay=config.decouple_weight_decay,
+            inner_eps=config.inner_eps,
+            eps=config.eps,
         )
 
     def init_sgdm(config: DictConfig):
@@ -223,6 +229,35 @@ def init_optimizer(
             adam_wd=config.adam_wd
         )
 
+    def init_prec_adam(config: DictConfig):
+        learning_rate = wrap_scheduler(
+            init_schedule(config.lr_config), wandb_log=wandb_log)
+        kwargs = OmegaConf.to_container(config)
+        del kwargs['lr_config']
+        del kwargs['name']
+        del kwargs['weight_decay']
+        return prec_adam.adam_prec(
+            learning_rate=learning_rate,
+            **kwargs
+        )
+        #     b1=config.b1,
+        #     b2=config.b2,
+        #     b3=config.b3,
+        #     pre_diag=config.pre_diag,
+        #     post_diag=config.post_diag,
+        #     pre_matrix_diag=config.pre_matrix_diag,
+        #     do_matrix=config.do_matrix,
+        #     eps=config.eps,
+        #     solver=config.solver,
+        #     eps_type=config.eps_type,
+        #     inner_eps=config.inner_eps,
+        #     outer_eps=config.outer_eps,
+        #     threshold=config.threshold,
+        #     offset_beta=config.offset_beta,
+        #     wd=config.wd,
+        # )
+
+
     # Initialize base optimizer.
     name = config.optimizer.name
     opt_config = config.optimizer
@@ -240,6 +275,10 @@ def init_optimizer(
         optimizer = init_sgdm(opt_config)
     elif name == "muon":
         optimizer = init_muon(opt_config)
+    elif name == "precond":
+        optimizer = precond.get_optimizer(conf=opt_config)
+    elif name == 'prec_adam':
+        optimizer = init_prec_adam(config=opt_config)
 
     # Wrap online-to-nonconvex.
     if name in ["ogd_md"]:

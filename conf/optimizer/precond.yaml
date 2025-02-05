@@ -1,0 +1,50 @@
+name: precond
+averaging:
+    weight_ratio: 'poly_cap'
+    weight_decay: 0.0
+    wr:
+        power: 1.0
+        cap: 0.99999
+
+    beta: 'avgsqrtweight'
+
+do_average_offset: True
+offset:
+    grad_scale: False
+    filter: False
+    offset_init: 'params'
+
+
+use_unit: per_layer
+
+add_conv:
+    scale_type: 'const'
+    key: 31
+
+conversion: 'average'
+# direction: 'unit_d'
+# direction_kwargs:
+#     eps: 1.0
+#     solver: 'solve_inc'
+#     eps_type: 'trace'
+#     threshold: 4096
+#     normalize: True
+direction: 'precond'
+direction_kwargs: {}
+    # eps: 1.0
+    # solver: 'solve_inc'
+    # eps_type: 'trace'
+    # threshold: 4096
+    # normalize: True
+
+# scale: 'mirror_descent'
+# scale_kwargs:
+#     beta: null
+#     lr_rescale: 1e-4
+
+scale: 'pos_log_cb'
+scale_kwargs: {}
+# scale_kwargs:
+#     eps: 1e-4
+#     k: 4
+#     minvalue: 0.0

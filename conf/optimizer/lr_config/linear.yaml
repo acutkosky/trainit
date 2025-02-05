@@ -3,3 +3,4 @@ lr: 3e-4
 warmup: null
 const: null
 max_steps: null
+end_value: 0.0
