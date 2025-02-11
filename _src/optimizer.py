@@ -6,6 +6,7 @@ import jax.random as jr
 import optax
 import optimizers
 import equinox as eqx
+import copy
 from omegaconf import DictConfig, OmegaConf
 from typing import Any, Tuple
 from jaxtyping import PRNGKeyArray
@@ -56,7 +57,7 @@ def init_schedule(lr_config: DictConfig) -> optax.ScalarOrSchedule:
             const_steps=const_steps,
             total_steps=config.max_steps,
             init_value=0.0,
-            end_value=connfig.end_value,
+            end_value=config.end_value,
         )
         return learning_rate
     
@@ -170,6 +171,7 @@ def init_optimizer(
             beta1=config.beta1,
             beta2=config.beta2,
             eps=config.eps,
+            inner_eps=config.inner_eps,
             weight_decay=config.weight_decay,
             use_nesterov=config.use_nesterov,
         )
@@ -196,7 +198,6 @@ def init_optimizer(
             weight_decay=config.weight_decay,
             decouple_weight_decay=config.decouple_weight_decay,
             inner_eps=config.inner_eps,
-            eps=config.eps,
         )
 
     def init_sgdm(config: DictConfig):
@@ -213,7 +214,7 @@ def init_optimizer(
     def init_muon(config: DictConfig):
         muon_lr = wrap_scheduler(
             init_schedule(config.lr_config), wandb_log=wandb_log)
-        adam_lr_config = config.lr_config
+        adam_lr_config = copy.deepcopy(config.lr_config)
         adam_lr_config.lr = config.adam_lr
         adam_lr = wrap_scheduler(
             init_schedule(adam_lr_config), wandb_log=wandb_log, schedule_title="adam_schedule")
@@ -222,11 +223,14 @@ def init_optimizer(
             momentum=config.momentum,
             nesterov=config.nesterov,
             ns_steps=config.ns_steps,
+            use_l2=config.use_l2,
             adam_lr=adam_lr,
             adam_beta1=config.adam_beta1,
             adam_beta2=config.adam_beta2,
             adam_eps=config.adam_eps,
-            adam_wd=config.adam_wd
+            adam_wd=config.adam_wd,
+            offset_beta=config.muon_offset_beta,
+            beta2=config.muon_beta2,
         )
 
     def init_prec_adam(config: DictConfig):
@@ -280,6 +284,10 @@ def init_optimizer(
     elif name == 'prec_adam':
         optimizer = init_prec_adam(config=opt_config)
 
+    if opt_config.offset_beta:
+        optimizer = optax.chain(optimizer, optimizers.offset_momentum(opt_config.offset_beta))
+    if opt_config.igt_beta:
+        optimizer = optax.chain(optimizer, optimizers.implicit_transport(opt_config.igt_beta))
     # Wrap online-to-nonconvex.
     if name in ["ogd_md"]:
         wrap_o2nc = True

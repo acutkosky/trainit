@@ -22,9 +22,9 @@ class AdamBaseState(NamedTuple):
     nu: Optional[optax.Updates]
     log_state: Optional[LogState]
     log_metrics: Optional[log_utils.Log]
+    offset: Optional[optax.Updates]
 
 
-<<<<<<< HEAD
 def adam_base(
         learning_rate: optax.ScalarOrSchedule = 1e-4,
         beta1: float = 0.9,
@@ -41,6 +41,7 @@ def adam_base(
         use_precond_state: bool = True,
         inner_eps: float=0.0,
         logger: Optional[Logger] = None,
+        offset_beta: Optional[float] = None,
 ) -> optax.GradientTransformation:
     """The base Adam optimizer.
 
@@ -103,12 +104,14 @@ def adam_base(
             nu=jtu.tree_map(jnp.zeros_like, params) if use_precond_state else None,
             log_state=log_state,
             log_metrics=log_metrics,
+            offset=jtu.tree_map(jnp.zeros_like, params) if offset_beta else None,
         )
     
     def update_fn(updates, state, params):
         count = state.count
         mu = state.mu
         nu = state.nu
+        log_state = state.log_state
 
         count_inc = optax.safe_int32_increment(count)
 
@@ -164,6 +167,20 @@ def adam_base(
             updates = jtu.tree_map(
                 lambda u, p: u + wd * p, updates, params)
 
+        if offset_beta:
+            next_offset = jtu.tree_map(
+                lambda o, u: o * offset_beta + (1-offset_beta) * u,
+                state.offset,
+                updates
+            )
+
+            updates = jtu.tree_map(
+                lambda a, b: a+b,
+                updates,
+                next_offset
+            )
+        else:
+            next_offset = state.offset
         # Apply negative learning rate.
         eta = schedule.get_current_lr(learning_rate, count)
         updates = tree_utils.scalar_dot(updates, -eta)
@@ -195,6 +212,7 @@ def adam_base(
             nu=nu,
             log_state=log_state,
             log_metrics=log_metrics,
+            offset=next_offset,
         )
     
     return optax.GradientTransformation(init_fn, update_fn)
@@ -241,6 +259,7 @@ def adamw(
         weight_decay: float = 0.0,
         use_nesterov: bool = False,
         logger: Optional[Logger] = None,
+        offset_beta: Optional[float] = None,
 ) -> optax.GradientTransformation:
     """Implements the AdamW optimizer from
     
@@ -264,6 +283,7 @@ def adamw(
         use_precond=True,
         use_precond_state=True,
         logger=logger,
+        offset_beta=offset_beta,
     )
 
 
@@ -275,6 +295,7 @@ def nadam(
         weight_decay: float = 0.0,
         decouple_weight_decay: bool = True,
         logger: Optional[Logger] = None,
+        offset_beta: Optional[float] = None,
 ) -> optax.GradientTransformation:
     """Implements the Nadam optimizer from
     
@@ -299,6 +320,7 @@ def nadam(
         use_precond=True,
         use_precond_state=True,
         logger=logger,
+        offset_beta=offset_beta,
     )
 
 
@@ -309,6 +331,7 @@ def rmsprop(
         weight_decay: float = 0.0,
         decouple_weight_decay: bool = True,
         logger: Optional[Logger] = None,
+        offset_beta: Optional[float] = None,
     ) -> optax.GradientTransformation:
     """The RMSProp optimizer from
     
@@ -330,6 +353,7 @@ def rmsprop(
         use_precond=True,
         use_precond_state=True,
         logger=logger,
+        offset_beta=offset_beta,
     )
 
 
@@ -340,6 +364,7 @@ def sgdm(
         weight_decay: float = 0.0,
         decouple_weight_decay: bool = True,
         logger: Optional[Logger] = None,
+        offset_beta: Optional[float] = None,
 ) -> optax.GradientTransformation:
     """The SGD-Momentum optimizer.
     
@@ -387,6 +412,7 @@ def sgdm(
         use_precond=False,
         use_precond_state=False,
         logger=logger,
+        offset_beta=offset_beta,
     )
     # NOTE: to adhere to conventional implementation of SGDM,
     # we scale up the final update by 1/(1-\beta).
