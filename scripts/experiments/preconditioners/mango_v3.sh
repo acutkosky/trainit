@@ -15,7 +15,7 @@ const=null
 
 optimizer=mango_v3
 
-exp_name=mango_v3_fix
+exp_name=mango_v3
 
 # System variables
 BASE_DIR=/projectnb/aclab/qinziz/trainit
@@ -104,7 +104,7 @@ parse() {
     fi
 }
 
-# project=null
+project=null
 
 layers=("mat" "embedding" "head" "attn_w" "attn_b" "vec_w" "vec_b")
 keys=(
@@ -127,6 +127,8 @@ keys=(
   "use_adamw"
   "offset_beta"
   "igt_scale"
+  "coupled_normalize"
+  "coupled_normalize_power"
 )
 
 # Start building the args list.
@@ -146,39 +148,41 @@ args=(
   "optimizer.lr_config.max_steps=$steps"
 )
 
-# Add core configs. Override default configs by
-# specifying <layer>_<key>=...
-#   First argument: optimizer.core.<layer>.<key>
-#   Second argument: <layer>_<key>
+# Override default (global) configs
+for key in "${keys[@]}"; do
+  args+=( "$(parse "optimizer.core._defaults.${key}" "${key}")" )
+done
+
+# Override layer-specific configs
 for layer in "${layers[@]}"; do
   for key in "${keys[@]}"; do
     args+=( "$(parse "optimizer.core.${layer}.${key}" "${layer}_${key}")" )
   done
 done
 
-# python main.py ${args[@]}
-
-job_output=$(qsub <<EOF
-#!/bin/bash -l
-
-#$ -pe omp 8
-#$ -l gpus=1
-#$ -l gpu_type=L40S     # Specifies the gpu type.
-#$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
-#$ -N "$name".sh
-#$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
-#$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
-
-sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
-
-source activate_env.sh
 python main.py ${args[@]}
-EOF
-)
 
-# Save job id and associated name to local .txt
-# This is extremely helpful to manage a bunch of experiments.
-job_id=$(echo "$job_output" | awk '{print $3}')
-echo "job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+# job_output=$(qsub <<EOF
+# #!/bin/bash -l
 
-echo "Submitted job: $name"
+# #$ -pe omp 8
+# #$ -l gpus=1
+# #$ -l gpu_type=L40S     # Specifies the gpu type.
+# #$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
+# #$ -N "$name".sh
+# #$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
+# #$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
+
+# sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
+
+# source activate_env.sh
+# python main.py ${args[@]}
+# EOF
+# )
+
+# # Save job id and associated name to local .txt
+# # This is extremely helpful to manage a bunch of experiments.
+# job_id=$(echo "$job_output" | awk '{print $3}')
+# echo "job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+
+# echo "Submitted job: $name"

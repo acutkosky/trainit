@@ -29,6 +29,8 @@ core:
     use_adamw: false
     offset_beta: 0.95   # offset is default turned on
     igt_scale: 0.0
+    coupled_normalize: false
+    coupled_normalize_power: 0.5
 
   # Use the common settings for each layer, and override fields as needed.
   mat:
