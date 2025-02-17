@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
 
-from typing import NamedTuple, Callable
+from typing import NamedTuple, Callable, Optional
 from jaxtyping import Array, PyTree
 
 from utils import tree_utils
@@ -80,7 +80,7 @@ def scale_by_newton_schulz(
 
 class ScaleByGradSquaredState(NamedTuple):
     """scale_by_grad_squared state."""
-    grad_squared: optax.Updates
+    grad_squared: Optional[optax.Updates]
 
 
 # NOTE: the current implementation doesn't use beta*v + (1-beta)*g**2
@@ -106,18 +106,20 @@ def scale_by_grad_squared(
     
     def init_fn(params):
         return ScaleByGradSquaredState(
-            grad_squared = tree_utils.zeros_like(params)
+            grad_squared = tree_utils.zeros_like(params) if beta else None
         )
 
     def update_fn(updates, state, params=None):
         del params
         grad_squared = state.grad_squared
-        grad_squared = jtu.tree_map(
-            lambda v, g: beta * v + g**2, grad_squared, updates
-        )
-        updates = jtu.tree_map(
-            lambda g, v: g / (jnp.sqrt(v) + eps), updates, grad_squared
-        )
+        # Only updates when beta is non-trivial.
+        if beta:
+            grad_squared = jtu.tree_map(
+                lambda v, g: beta * v + g**2, grad_squared, updates
+            )
+            updates = jtu.tree_map(
+                lambda g, v: g / (jnp.sqrt(v) + eps), updates, grad_squared
+            )
         return updates, ScaleByGradSquaredState(grad_squared=grad_squared)
 
     return optax.GradientTransformation(init_fn, update_fn)
