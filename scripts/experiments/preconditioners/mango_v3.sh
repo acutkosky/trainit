@@ -94,17 +94,17 @@ mkdir -p $OUTPUT_PATH
 # ... NEW EXPERIMENTS OF COUPLED NORMALIZATION
 #     WITH GRAD_SQUARED PRECONDITIONING
 # ...... Fixed beta2=0.95
-# coupled_normalize=True
-# coupled_normalize_power=0.5
-# coupled_normalize_power=0.25
-# name="mango_v3_coupled_normalize_p${coupled_normalize_power}"
-
-# ...... Different beta2
+beta2=0.95
 coupled_normalize=True
 coupled_normalize_power=0.5
-coupled_normalize_power=0.25
-beta2=0.99
-name="mango_v3_coupled_normalize_beta2${beta2}_p${coupled_normalize_power}"
+coupled_normalize_correct_bias=True
+
+lr=0.03
+# lr=0.01
+# lr=3e-3
+# lr=1e-3
+# lr=3e-4
+name="mango_v3_coupled_lr${lr}"
 
 
 # ========================================================================
@@ -145,6 +145,7 @@ keys=(
   "igt_scale"
   "coupled_normalize"
   "coupled_normalize_power"
+  "coupled_normalize_correct_bias"
 )
 
 # Start building the args list.
