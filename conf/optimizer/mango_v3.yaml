@@ -31,6 +31,7 @@ core:
     igt_scale: 0.0
     coupled_normalize: false
     coupled_normalize_power: 0.5
+    coupled_normalize_correct_bias: true
 
   # Use the common settings for each layer, and override fields as needed.
   mat:

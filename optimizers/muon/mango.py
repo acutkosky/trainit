@@ -335,6 +335,7 @@ def scale_by_param_function(
 
 class NormalizeWithGradSquaredState(NamedTuple):
     """normalize_with_grad_squared wrapper state."""
+    count: Array
     grad_squared: Optional[optax.Updates]
     inner_state: optax.OptState
 
@@ -345,6 +346,7 @@ def normalize_with_grad_squared(
         beta: float = 0.0,
         eps: float = 1e-8,
         power: float = 0.5,
+        correct_bias: bool = True,
 ) -> optax.GradientTransformation:
     """Normalize with grad_squared wrapper.
 
@@ -368,20 +370,24 @@ def normalize_with_grad_squared(
     """
     def init_fn(params):
         return NormalizeWithGradSquaredState(
+            count=jnp.zeros([], dtype=jnp.int32),
             grad_squared=tree_utils.zeros_like(params) if beta else None,
             inner_state=inner.init(params),
         )
     
     def update_fn(updates, state, params):
+        count = state.count
         grad_squared = state.grad_squared
         inner_state = state.inner_state
+
+        count_inc = optax.safe_int32_increment(count)
 
         # Special case when beta = 0:
         if not beta:
             updates, inner_state = inner.update(updates, inner_state, params)
             updates = jtu.tree_map(normalize_fn, updates)
             return updates, NormalizeWithGradSquaredState(
-                grad_squared=grad_squared, inner_state=inner_state
+                count=count_inc, grad_squared=grad_squared, inner_state=inner_state
             )
 
         # NOTE: for now, we implemented the series notion,
@@ -390,13 +396,17 @@ def normalize_with_grad_squared(
         # NOTE: numerical stability could be an issue if we use
         # arbitrary power and jnp.power(). 
         # For now, we probably could interest in sqrt(V) or V**0.25. 
-        if power == 0.5:
-            precondition = lambda u, v: u / (jnp.sqrt(v) + eps)
-        elif power == 0.25:
-            precondition = lambda u, v: u / (jnp.sqrt(jnp.sqrt(v)) + eps)
+        if correct_bias:
+            bias_correction = lambda v: v / (1 - beta**count_inc)
         else:
-            precondition = lambda u, v: u / (jnp.power(v, power) + eps)
-        
+            bias_correction = lambda v: v
+        if power == 0.5:
+            precondition = lambda u, v: u / (jnp.sqrt(bias_correction(v)) + eps)
+        elif power == 0.25:
+            precondition = lambda u, v: u / (jnp.sqrt(jnp.sqrt(bias_correction(v))) + eps)
+        else:
+            precondition = lambda u, v: u / (jnp.power(bias_correction(v), power) + eps)
+
         grad_squared = jtu.tree_map(update_grad_squared, grad_squared, updates)
         updates, inner_state = inner.update(updates, inner_state, params)
         updates = jtu.tree_map(precondition, updates, grad_squared)
@@ -404,7 +414,7 @@ def normalize_with_grad_squared(
         updates = jtu.tree_map(precondition, updates, grad_squared)
 
         return updates, NormalizeWithGradSquaredState(
-            grad_squared=grad_squared, inner_state=inner_state
+            count=count_inc, grad_squared=grad_squared, inner_state=inner_state
         )
 
     return optax.GradientTransformation(init_fn, update_fn)
@@ -820,6 +830,7 @@ def mango_core(
         igt_scale: float = 0.0,
         coupled_normalize: bool = False,
         coupled_normalize_power: float = 0.5,
+        coupled_normalize_correct_bias: bool = True,
 ):
     # Base optimizer: AdamW or LaProp
     # TODO: include non-diagonal preconditioning like SOAP
@@ -858,8 +869,12 @@ def mango_core(
         )
         if coupled_normalize:
             optim_normalized = normalize_with_grad_squared(
-                inner=inner, normalize_fn=normalize_fn, 
-                beta=beta2, eps=eps, power=coupled_normalize_power,
+                inner=inner, 
+                normalize_fn=normalize_fn, 
+                beta=beta2,
+                eps=eps, 
+                power=coupled_normalize_power,
+                correct_bias=coupled_normalize_correct_bias,
             )
         else:
             optim_normalized = optax.chain(
