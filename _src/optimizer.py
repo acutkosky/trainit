@@ -355,8 +355,10 @@ def init_optimizer(
         lr_config = OmegaConf.create(config.lr_config)
         lr_config.lr = 1.0
         schedule = init_schedule(lr_config)
+        config_dict = OmegaConf.to_container(config.core)
+        config_dict.pop("_defaults")
         return optimizers.mango_v3(
-            config_dict=OmegaConf.to_container(config.core),
+            config_dict=config_dict,
             schedule=schedule,
         )
     
