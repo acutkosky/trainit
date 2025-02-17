@@ -91,6 +91,22 @@ mkdir -p $OUTPUT_PATH
 # name="mango_v3_emb_l2col_dim-scale"
 
 
+# ... NEW EXPERIMENTS OF COUPLED NORMALIZATION
+#     WITH GRAD_SQUARED PRECONDITIONING
+# ...... Fixed beta2=0.95
+# coupled_normalize=True
+# coupled_normalize_power=0.5
+# coupled_normalize_power=0.25
+# name="mango_v3_coupled_normalize_p${coupled_normalize_power}"
+
+# ...... Different beta2
+coupled_normalize=True
+coupled_normalize_power=0.5
+coupled_normalize_power=0.25
+beta2=0.99
+name="mango_v3_coupled_normalize_beta2${beta2}_p${coupled_normalize_power}"
+
+
 # ========================================================================
 # Below is submit function. Only change the part related to global
 # vs param-wise learning rate.
