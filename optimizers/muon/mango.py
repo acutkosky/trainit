@@ -333,13 +333,13 @@ def scale_by_param_function(
     return optax.GradientTransformation(init_fn, update_fn)
 
 
-class NormalizeWithGradSquared(NamedTuple):
+class NormalizeWithGradSquaredState(NamedTuple):
     """normalize_with_grad_squared wrapper state."""
     grad_squared: Optional[optax.Updates]
     inner_state: optax.OptState
 
 
-def normalize_with_grad_precond(
+def normalize_with_grad_squared(
         inner: optax.GradientTransformation,
         normalize_fn: NormalizeFn,
         beta: float = 0.0,
@@ -367,7 +367,7 @@ def normalize_with_grad_precond(
     In general, we can replace sqrt(V) with arbitrary power, V**p.
     """
     def init_fn(params):
-        return NormalizeWithGradSquared(
+        return NormalizeWithGradSquaredState(
             grad_squared=tree_utils.zeros_like(params) if beta else None,
             inner_state=inner.init(params),
         )
@@ -375,6 +375,14 @@ def normalize_with_grad_precond(
     def update_fn(updates, state, params):
         grad_squared = state.grad_squared
         inner_state = state.inner_state
+
+        # Special case when beta = 0:
+        if not beta:
+            updates, inner_state = inner.update(updates, inner_state, params)
+            updates = jtu.tree_map(normalize_fn, updates)
+            return updates, NormalizeWithGradSquaredState(
+                grad_squared=grad_squared, inner_state=inner_state
+            )
 
         # NOTE: for now, we implemented the series notion,
         # instead of the EMA notion v*beta + (1-beta)*g**2. 
@@ -395,7 +403,7 @@ def normalize_with_grad_precond(
         updates = jtu.tree_map(normalize_fn, updates)
         updates = jtu.tree_map(precondition, updates, grad_squared)
 
-        return updates, NormalizeWithGradSquared(
+        return updates, NormalizeWithGradSquaredState(
             grad_squared=grad_squared, inner_state=inner_state
         )
 
