@@ -25,6 +25,9 @@ from optimizers.muon.base import (
 
 
 ArrayFn = Callable[[Array], Array]
+NormalizeFn = ArrayFn
+
+
 
 def split_vmap(f: ArrayFn, num_heads: int = 1) -> ArrayFn:
     """Broadcasts a function f: [d,:] -> [d,:] to a matrix/vector [3nd,:]
@@ -54,7 +57,7 @@ def split_vmap(f: ArrayFn, num_heads: int = 1) -> ArrayFn:
     return split_fn
 
 
-def scale_by_normalization(
+def get_normalize_fn(
         normalize: str | None = None,
         eps: float = 1e-8,
         ns_steps: int = 6,
@@ -63,17 +66,15 @@ def scale_by_normalization(
         transpose: bool = False,
         clip_min: float | None = None,
         clip_max: float | None = None,
-):
-    if normalize is None:
-        return optax.identity()
-    
+) -> NormalizeFn:
     if clip_min is None:
         clip_min = 0.0
     if clip_max is None:
         clip_max = jnp.inf
+    clip = lambda x: jnp.clip(x, min=clip_min, max=clip_max)
 
     # Base normalization functions.
-    clip = lambda x: jnp.clip(x, min=clip_min, max=clip_max)
+    identity = lambda G: G
 
     normalize_l2 = lambda G: G / (jnp.linalg.norm(G) + eps)
     scale_l2 = lambda G: G * clip(len(G)**0.5)
@@ -132,7 +133,9 @@ def scale_by_normalization(
     wrap_normalize_ns_split = split_vmap(wrap_normalize_ns, num_heads=num_heads)
 
     # Assign normalize functions.
-    if normalize == "l2":
+    if normalize is None:
+        normalize_fn = identity
+    elif normalize == "l2":
         normalize_fn = wrap_normalize_l2
     elif normalize == "l2_row":
         normalize_fn = wrap_normalize_l2_row
@@ -149,6 +152,11 @@ def scale_by_normalization(
     else:
         raise ValueError(f"invalid normalization type = '{normalize}'.")
     
+    return normalize_fn
+
+
+def scale_by_normalization(**kwargs):
+    normalize_fn = get_normalize_fn(**kwargs)
     return scale_by_function(normalize_fn)
 
 
@@ -325,6 +333,79 @@ def scale_by_param_function(
     return optax.GradientTransformation(init_fn, update_fn)
 
 
+class NormalizeWithGradSquared(NamedTuple):
+    """normalize_with_grad_squared wrapper state."""
+    grad_squared: Optional[optax.Updates]
+    inner_state: optax.OptState
+
+
+def normalize_with_grad_precond(
+        inner: optax.GradientTransformation,
+        normalize_fn: NormalizeFn,
+        beta: float = 0.0,
+        eps: float = 1e-8,
+        power: float = 0.5,
+) -> optax.GradientTransformation:
+    """Normalize with grad_squared wrapper.
+
+    The wrapper works like the following.  Given some norm |X|, we define 
+    |X|_V = |sqrt(V)*X|, V = \sum g**2.
+
+    This wrapper then normalizes update U_t w.r.t. |U_t|_{V_t}, i.e., 
+    U \mapsto \argmax_{|X|_V=1} <X, U>
+        = ( \argmax_{|Y|=1} <Y, U/sqrt(V)> ) / sqrt(V),
+
+    where Y can be found by `normalize_fn`.
+    
+    This corresponds to the following work flow:
+        1. Update preoonditioner V = V*beta + g**2,
+        2. Call inner optimizer and get update U,
+        3. Precondition U -> U / sqrt(V),
+        3. Normalize U,
+        4. Precondition U again U -> U / sqrt(V).
+    
+    In general, we can replace sqrt(V) with arbitrary power, V**p.
+    """
+    def init_fn(params):
+        return NormalizeWithGradSquared(
+            grad_squared=tree_utils.zeros_like(params) if beta else None,
+            inner_state=inner.init(params),
+        )
+    
+    def update_fn(updates, state, params):
+        grad_squared = state.grad_squared
+        inner_state = state.inner_state
+
+        # NOTE: for now, we implemented the series notion,
+        # instead of the EMA notion v*beta + (1-beta)*g**2. 
+        update_grad_squared = lambda v, g: v*beta + g**2
+        # NOTE: numerical stability could be an issue if we use
+        # arbitrary power and jnp.power(). 
+        # For now, we probably could interest in sqrt(V) or V**0.25. 
+        if power == 0.5:
+            precondition = lambda u, v: u / (jnp.sqrt(v) + eps)
+        elif power == 0.25:
+            precondition = lambda u, v: u / (jnp.sqrt(jnp.sqrt(v)) + eps)
+        else:
+            precondition = lambda u, v: u / (jnp.power(v, power) + eps)
+        
+        grad_squared = jtu.tree_map(update_grad_squared, grad_squared, updates)
+        updates, inner_state = inner.update(updates, inner_state, params)
+        updates = jtu.tree_map(precondition, updates, grad_squared)
+        updates = jtu.tree_map(normalize_fn, updates)
+        updates = jtu.tree_map(precondition, updates, grad_squared)
+
+        return updates, NormalizeWithGradSquared(
+            grad_squared=grad_squared, inner_state=inner_state
+        )
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
+# ========================================================================
+# Default parameter partitioning.
+# ========================================================================
+
 mango_gpt_keys = ["mat", "embedding", "head", "attn_w", "attn_b", "vec_w", "vec_b"]
 
 
@@ -373,6 +454,10 @@ def mango_label_gpt(params):
         raise ValueError(f"cannot categorize parameter: {p}")
     return jtu.tree_map_with_path(fn, params) 
 
+
+# ========================================================================
+# OG Mango.
+# ========================================================================
 
 def mango(
         lrs: float | Dict[str, float] = 0.05,
@@ -440,6 +525,10 @@ def mango(
         optim_offset,
     )
 
+
+# ========================================================================
+# Visualization GradientTransformation.
+# ========================================================================
 
 class VisualizeNormState(NamedTuple):
     """An empty node for visualize_norm state."""
@@ -515,6 +604,12 @@ def visualize_norm(
         return updates, VisualizeNormState()
     
     return optax.GradientTransformation(init_fn, update_fn)
+
+
+# ========================================================================
+# Mango v2.
+# Enabling more flexible algorithm construction.
+# ========================================================================
 
 
 def mango_v2(
