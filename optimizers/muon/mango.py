@@ -818,36 +818,57 @@ def mango_core(
         use_adamw: bool = False,
         offset_beta: float = 0.0,
         igt_scale: float = 0.0,
+        coupled_normalize: bool = False,
+        coupled_normalize_power: float = 0.5,
 ):
     # Base optimizer: AdamW or LaProp
     # TODO: include non-diagonal preconditioning like SOAP
-    if not beta2:
-        optim_base = optax.trace(decay=beta1, nesterov=nesterov)
-    else:
-        if use_adamw:
-            # Optax implements Nadam based on 
-            # Dozat 2016 https://openreview.net/pdf?id=OM0jvwB8jIp57ZJjtNEZ
-            # with a caveat that nu_hat is not multiplied by beta2.
-            # See further notes in optax implementation.
-            optim_base = optax.scale_by_adam(b1=beta1, b2=beta2, eps=eps, nesterov=nesterov)
+    def init_optim_base():
+        # NOTE: Optax.trace uses the conventional mu = mu * beta + g
+        # instead of the average formula, i.e., mu = mu * beta + (1-beta) * g.
+        optim_momentum = optax.trace(decay=beta1, nesterov=nesterov)
+        # NOTE: Optax implements Nadam based on 
+        # Dozat 2016 https://openreview.net/pdf?id=OM0jvwB8jIp57ZJjtNEZ
+        # with a caveat that nu_hat is not multiplied by beta2.
+        # See further notes in optax implementation.
+        optim_adamw = optax.scale_by_adam(b1=beta1, b2=beta2, eps=eps, nesterov=nesterov)
+        optim_laprop = optax.chain(
+            scale_by_grad_squared(beta=beta2, eps=eps),
+            optim_momentum,
+        )
+        if coupled_normalize:
+            optim_base = optim_momentum
         else:
-            # Optax.trace uses the conventional mu = mu * beta + g
-            # instead of the average formula, i.e., mu = mu * beta + (1-beta) * g.
-            optim_base = optax.chain(
-                scale_by_grad_squared(beta=beta2, eps=eps),
-                optax.trace(decay=beta1, nesterov=nesterov)
+            if use_adamw:
+                optim_base = optim_adamw
+            else:
+                optim_base = optim_laprop
+        return optim_base
+    
+    def init_optim_normalized(inner):
+        normalize_fn = get_normalize_fn(
+            normalize, 
+            eps=eps, 
+            ns_steps=ns_steps, 
+            num_heads=num_heads,
+            scale_dim=scale_dim,
+            transpose=scale_dim_transpose,
+            clip_min=scale_dim_clip_min,
+            clip_max=scale_dim_clip_max,
+        )
+        if coupled_normalize:
+            optim_normalized = normalize_with_grad_squared(
+                inner=inner, normalize_fn=normalize_fn, 
+                beta=beta2, eps=eps, power=coupled_normalize_power,
             )
-    # Normalization layer
-    optim_normalization = scale_by_normalization(
-        normalize, 
-        eps=eps, 
-        ns_steps=ns_steps, 
-        num_heads=num_heads,
-        scale_dim=scale_dim,
-        transpose=scale_dim_transpose,
-        clip_min=scale_dim_clip_min,
-        clip_max=scale_dim_clip_max,
-    )
+        else:
+            optim_normalized = optax.chain(
+                inner, scale_by_function(normalize_fn)
+            )
+        return optim_normalized
+    
+    optim_base = init_optim_base()
+    optim_normalized = init_optim_normalized(optim_base)
     # Norm scaling layer
     optim_norm_scaling = scale_by_weight_norm(
         scale_norm, 
@@ -856,8 +877,7 @@ def mango_core(
         clip_high=scale_norm_clip_max,
     )
     return optax.chain(
-        optim_base,
-        optim_normalization,
+        optim_normalized,
         optim_norm_scaling,
         optax.scale_by_learning_rate(learning_rate),
         scale_by_offset(beta=offset_beta) if offset_beta else optax.identity(),
