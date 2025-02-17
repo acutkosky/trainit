@@ -20,6 +20,7 @@ def main(config: DictConfig) -> None:
     # verbose=1 to print the final config; 
     # verbose=2 to print both initial and final config.
     config = init_config(config, verbose=2)
+    # raise KeyboardInterrupt     # print config for test purpose
     
     # NOTE: customize each component in `_src` if needed.
     train_state, optimizer, train_loader, loss_fn, logger, wandb_logger = init_pipeline(config)
