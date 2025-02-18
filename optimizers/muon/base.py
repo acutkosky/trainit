@@ -11,6 +11,9 @@ from jaxtyping import Array, PyTree
 from utils import tree_utils
 
 
+LabelParamsFn = Callable[..., str]
+
+
 def newton_schulz(G: Array, steps: int) -> Array:
     """An approximate Newton-Schulz method.
     
