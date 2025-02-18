@@ -99,12 +99,17 @@ coupled_normalize=True
 coupled_normalize_power=0.5
 coupled_normalize_correct_bias=True
 
-lr=0.03
+# lr=0.03
 # lr=0.01
 # lr=3e-3
 # lr=1e-3
 # lr=3e-4
-name="mango_v3_coupled_lr${lr}"
+# lr=1e-4
+# lr=3e-5
+# lr=1e-5
+# lr=3e-6
+# lr=1e-6
+name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
 
 
 # ========================================================================
@@ -124,11 +129,13 @@ parse() {
 
 layers=("mat" "embedding" "head" "attn_w" "attn_b" "vec_w" "vec_b")
 keys=(
+  # base
   "lr"
   "beta1"
   "beta2"
   "nesterov"
   "eps"
+  # normalization
   "normalize"
   "scale_dim"
   "scale_dim_transpose"
@@ -136,10 +143,13 @@ keys=(
   "scale_dim_clip_max"
   "ns_steps"
   "num_heads"
+  # norm scaling
   "scale_norm"
+  "scale_norm_ratio"
   "scale_norm_power"
   "scale_norm_clip_min"
   "scale_norm_clip_max"
+  # others
   "use_adamw"
   "offset_beta"
   "igt_scale"

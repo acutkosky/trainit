@@ -179,6 +179,23 @@ def scale_by_function(
     return optax.GradientTransformation(init_fn, update_fn)
 
 
+class ScaleByParamFunctionState(NamedTuple):
+    """An empty node for scale_by_param_function state."""
+
+
+def scale_by_param_function(
+        f: Callable[[optax.Updates, optax.Params], optax.Updates]
+) -> optax.GradientTransformation:
+    """Applies a function f: (updates, params) -> new_updates."""
+    def init_fn(params):
+        return ScaleByParamFunctionState()
+    
+    def update_fn(updates, state, params):
+        updates = jtu.tree_map(f, updates, params)
+        return updates, ScaleByParamFunctionState()
+    
+    return optax.GradientTransformation(init_fn, update_fn)
+
 
 class ImplicitGradientTransportState(NamedTuple):
     """implicit_gradient_transport state"""

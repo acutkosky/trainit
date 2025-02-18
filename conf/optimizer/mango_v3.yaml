@@ -22,6 +22,7 @@ core:
     num_heads: 12
     # Norm scaling
     scale_norm: null
+    scale_norm_ratio: false
     scale_norm_power: 1.0
     scale_norm_clip_min: 1.0
     scale_norm_clip_max: null

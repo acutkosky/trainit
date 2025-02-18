@@ -10,15 +10,12 @@ from typing import NamedTuple, Optional, Callable, Literal, Dict, Tuple
 from jaxtyping import Array, PyTree
 
 from utils import tree_utils
-from optimizers.base import adamw
 from optimizers.combine import multi_transform
-from optimizers.schedule import get_current_lr
-from optimizers.muon.muon import scale_by_muon
 from optimizers.muon.base import (
     newton_schulz,
-    scale_by_newton_schulz,
     scale_by_grad_squared,
     scale_by_function,
+    scale_by_param_function,
     scale_by_offset,
     implicit_gradient_transport,
 )
@@ -129,6 +126,7 @@ list_of_induced_norms = [
 ]
 
 
+# deprecated
 def norm_pairing(
         induced_norm: str,
         dimension_correction: bool = True,
@@ -244,57 +242,82 @@ def norm_pairing(
     return norm_fn, normalize_fn
 
 
-class ScaleByWeightNormState(NamedTuple):
-    """An empty node for scale_by_weight_norm state."""
-
-
-def scale_by_weight_norm(
-        scale_weight: str | None = None,
-        scale_power: float = 1,
-        clip_low: float = 1.0,
-        clip_high: float = jnp.inf,
+def scale_by_absolute_tensor_norm(
+        norm: str | None = None,
+        power: float = 1,
+        clip_min: float | None = 1.0,
+        clip_max: float | None = None,
 ) -> optax.GradientTransformation:
-    if scale_weight is None:
+    """Scale the update by tensor norm of parameter.
+    
+    Works as
+    updates -> updates * clip(norm(params)**p, min, max).
+    """
+    if norm is None:
         return optax.identity()
-    clip = lambda x: jnp.clip(x, min=clip_low, max=clip_high)
-    name, p = scale_weight, scale_power
-    if name == "l2":
-        scale_fn = lambda u, w: u * clip(jnp.linalg.norm(w)**p)
-    if name == "l2_col":
-        scale_fn = lambda u, w: u * clip(jnp.linalg.norm(w, axis=1, keepdims=True)**p)
-    if name == "inf_":
-        scale_fn = lambda u, w: u * clip(jnp.linalg.norm(w, ord=jnp.inf)**p)
-    if name == "inf_col":
-        scale_fn = lambda u, w: u * clip(jnp.linalg.norm(w, ord=jnp.inf, axis=1, keepdims=True)**p)
-    if name == "op":
-        scale_fn = lambda u, w: u * clip(jnp.linalg.norm(w, ord=2)**p)
-
-    def init_fn(params=None):
-        del params
-        return ScaleByWeightNormState()
-    
-    def update_fn(updates, state, params):
-        updates = jtu.tree_map(scale_fn, updates, params)
-        return updates, ScaleByWeightNormState()
-
-    return optax.GradientTransformation(init_fn, update_fn)
+    if not clip_min:
+        clip_min = 0.0
+    if not clip_max:
+        clip_max = jnp.inf
+    clip_fn = lambda x: jnp.clip(x, min=clip_min, max=clip_max)
+    tensor_norm_fn = get_tensor_norm_fn(norm)
+    scale_fn = lambda u, p: u * clip_fn(tensor_norm_fn(p)**power)
+    return scale_by_param_function(scale_fn)
 
 
-class ScaleByParamFunctionState(NamedTuple):
-    """An empty node for scale_by_param_function state."""
+class ScaleByRelativeTensorNormState(NamedTuple):
+    """scale_by_relative_tensor_norm state."""
+    initial_clipped_norms: PyTree
 
 
-def scale_by_param_function(
-        f: Callable[[optax.Updates, optax.Params], optax.Updates]
+def scale_by_relative_tensor_norm(
+        norm: str | None = None,
+        power: float = 1,
+        clip_min: float | None = 1e-4,
+        clip_max: float | None = None,
 ) -> optax.GradientTransformation:
+    """Scale the update by ratio of tensor norm.
+    
+    Works as
+    updates -> updates * ( norm(p_t) / clip(norm(p_0)) )**p
+    """
+    if norm is None:
+        return optax.identity()
+    
+    tensor_norm_fn = get_tensor_norm_fn(norm)
+    
     def init_fn(params):
-        return ScaleByParamFunctionState()
+        initial_clipped_norms = jtu.tree_map(
+            lambda p: jnp.clip(tensor_norm_fn(p), min=clip_min, max=clip_max),
+            params
+        )
+        return ScaleByRelativeTensorNormState(
+            initial_clipped_norms=initial_clipped_norms
+        )
     
     def update_fn(updates, state, params):
-        updates = jtu.tree_map(f, updates, params)
-        return updates, ScaleByParamFunctionState()
+        current_norms = jtu.tree_map(tensor_norm_fn, params)
+        updates = jtu.tree_map(
+            lambda u, nt, n0: u * (nt / n0)**power,
+            updates, current_norms, state.initial_clipped_norms
+        )
+        return updates, state
     
     return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_tensor_norm(
+        norm: str | None = None,
+        power: float = 1,
+        clip_min: float | None = 1e-4,
+        clip_max: float | None = None,
+        scale_by_ratio: bool = False,
+) -> optax.GradientTransformation:
+    """Wraps both absolute and relative scale_by_tensor_norm methods."""
+    if scale_by_ratio:
+        return scale_by_relative_tensor_norm(norm, power, clip_min, clip_max)
+    else:
+        return scale_by_absolute_tensor_norm(norm, power, clip_min, clip_max)
 
 
 # ========================================================================
@@ -506,7 +529,6 @@ def visualize_norm(
 # Enabling more flexible algorithm construction.
 # ========================================================================
 
-
 def mango_v2(
         lr: float | Dict[str, float] = 0.05,
         beta1: float | Dict[str, float] = 0.95,
@@ -617,7 +639,7 @@ def mango_v2(
                     clip_min=scale_dim_clip_min,
                     clip_max=scale_dim_clip_max,
                 ),
-                scale_by_weight_norm(scale_weight, scale_power, clip_low=scale_clip_low, clip_high=scale_clip_high),
+                scale_by_tensor_norm(scale_weight, scale_power, clip_min=scale_clip_low, clip_max=scale_clip_high),
             )
         # Learning rate
         learning_rate = lr if schedule is None else lambda t: lr * schedule(t)
@@ -698,6 +720,7 @@ def mango_core(
         num_heads: int = 12,
         # norm scaling
         scale_norm: str | None = None,
+        scale_norm_ratio: bool = False,
         scale_norm_power: float = 1.0,
         scale_norm_clip_min: float | None = 1.0,
         scale_norm_clip_max: float | None = None,
@@ -759,18 +782,22 @@ def mango_core(
             )
         return optim_normalized
     
+    def init_optim_scale_norm():
+        optim_scale_norm = scale_by_tensor_norm(
+            norm=scale_norm,
+            power=scale_norm_power,
+            clip_min=scale_norm_clip_min,
+            clip_max=scale_norm_clip_max,
+            scale_by_ratio=scale_norm_ratio,
+        )
+        return optim_scale_norm
+    
     optim_base = init_optim_base()
     optim_normalized = init_optim_normalized(optim_base)
-    # Norm scaling layer
-    optim_norm_scaling = scale_by_weight_norm(
-        scale_norm, 
-        scale_power=scale_norm_power, 
-        clip_low=scale_norm_clip_min, 
-        clip_high=scale_norm_clip_max,
-    )
+    optim_scale_norm = init_optim_scale_norm()
     return optax.chain(
         optim_normalized,
-        optim_norm_scaling,
+        optim_scale_norm,
         optax.scale_by_learning_rate(learning_rate),
         scale_by_offset(beta=offset_beta) if offset_beta else optax.identity(),
         implicit_gradient_transport(beta=beta1, scale=igt_scale) if igt_scale else optax.identity(),
