@@ -29,6 +29,10 @@ mkdir -p $OUTPUT_PATH
 # Optimizer Configs.
 # ========================================================================
 
+lr=0.01
+adam_lr=0.01
+name="muon_lr${lr}_adam-lr_${adam_lr}"
+
 
 # ========================================================================
 # Submit function.
@@ -41,7 +45,7 @@ parse() {
     fi
 }
 
-project=null    # test purpose
+# project=null    # test purpose
 args=(
     "logging.wandb_project=$project"
     "logging.wandb_name=$name"
@@ -57,7 +61,7 @@ args=(
     "optimizer.lr_config.warmup=$warmup"
     "optimizer.lr_config.const=$const"
     "optimizer.lr_config.max_steps=$steps"
-    "$(parse "optimizer.lr_config.lr" "${lr}")"
+    "$(parse "optimizer.lr_config.lr" "lr")"
 )
 
 optimizer_keys=(
@@ -76,29 +80,29 @@ for key in "${optimizer_keys[@]}"; do
     args+=( "$(parse "optimizer.${key}" "${key}")" )
 done
 
-python main.py ${args[@]}
-
-# job_output=$(qsub <<EOF
-# #!/bin/bash -l
-
-# #$ -pe omp 8
-# #$ -l gpus=1
-# #$ -l gpu_type=L40S     # Specifies the gpu type.
-# #$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
-# #$ -N "$name".sh
-# #$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
-# #$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
-
-# sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
-
-# source activate_env.sh
 # python main.py ${args[@]}
-# EOF
-# )
 
-# # Save job id and associated name to local .txt
-# # This is extremely helpful to manage a bunch of experiments.
-# job_id=$(echo "$job_output" | awk '{print $3}')
-# echo "job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+job_output=$(qsub <<EOF
+#!/bin/bash -l
 
-# echo "Submitted job: $name"
+#$ -pe omp 8
+#$ -l gpus=1
+#$ -l gpu_type=L40S     # Specifies the gpu type.
+#$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
+#$ -N "$name".sh
+#$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
+#$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
+
+sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
+
+source activate_env.sh
+python main.py ${args[@]}
+EOF
+)
+
+# Save job id and associated name to local .txt
+# This is extremely helpful to manage a bunch of experiments.
+job_id=$(echo "$job_output" | awk '{print $3}')
+echo "job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+
+echo "Submitted job: $name"
