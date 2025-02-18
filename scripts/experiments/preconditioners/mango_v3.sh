@@ -8,6 +8,8 @@ project=pile_baseline
 log_data=False
 steps=2000
 batch_size=128
+# default to true, only change to false for test purpose
+use_amp=True
 
 schedule=linear
 warmup=200
@@ -60,6 +62,12 @@ mkdir -p $OUTPUT_PATH
 # head_normalize=null
 # name="mango_v3_head_null"
 
+# ......
+# head_lr=5e-5
+# name="mango_v3_head_rms-to-l2_head-lr${head_lr}"
+# head_lr=0.1
+# name="mango_v3_head_ns-lr${head_lr}"
+
 
 # ... Bias
 # ......
@@ -94,10 +102,10 @@ mkdir -p $OUTPUT_PATH
 # ... NEW EXPERIMENTS OF COUPLED NORMALIZATION
 #     WITH GRAD_SQUARED PRECONDITIONING
 # ...... Fixed beta2=0.95
-# beta2=0.95
-# coupled_normalize=True
-# coupled_normalize_power=0.5
-# coupled_normalize_correct_bias=True
+beta2=0.95
+coupled_normalize=True
+coupled_normalize_power=0.5
+coupled_normalize_correct_bias=True
 
 # lr=0.03
 # lr=0.01
@@ -106,10 +114,12 @@ mkdir -p $OUTPUT_PATH
 # lr=3e-4
 # lr=1e-4
 # lr=3e-5
-# lr=1e-5
+lr=1e-5
 # lr=3e-6
 # lr=1e-6
 # name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
+use_amp=False
+name="mango_v3_coupled-no-amp_p${coupled_normalize_power}_lr${lr}"
 
 
 # ... SCALE_BY_TENSOR_NORM EXPERIMENTS
@@ -182,27 +192,41 @@ mkdir -p $OUTPUT_PATH
 
 
 # ...... Relative norm scaling, scale all layers with proper tensor norms.
-mat_scale_norm="op"
-attn_w_scale_norm="op"
-head_scale_norm="op"
-embedding_scale_norm="rowmax_l2"
-vec_w_scale_norm="inf_"
-attn_b_scale_norm="l2"
-vec_b_scale_norm="l2"
+# mat_scale_norm="op"
+# attn_w_scale_norm="op"
+# head_scale_norm="op"
+# embedding_scale_norm="rowmax_l2"
+# vec_w_scale_norm="inf_"
+# attn_b_scale_norm="l2"
+# vec_b_scale_norm="l2"
 
-scale_norm_power=1.0
-scale_norm_ratio=True
-scale_norm_clip_min=1e-4
+# scale_norm_power=1.0
+# scale_norm_ratio=True
+# scale_norm_clip_min=1e-4
 
-lr=0.01
-lr=0.03
-lr=1e-3
-lr=3e-3
-lr=1e-4
+# lr=0.01
+# lr=0.03
+# lr=1e-3
+# lr=3e-3
+# lr=1e-4
 
-name="mango_v3_scale_all_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+# name="mango_v3_scale_all_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
 
 
+# ... San checks
+# project="mango_v3_test_qinzi"
+# # ......
+# # name="baseline"
+# # ......
+# # head_lr=0.01
+# # name="head_0.01"
+# # ......
+# head_normalize="ns"
+# scale_dim=True
+# # head_lr=0.01
+# # name="head_0.01_new"
+# head_lr=5e-5
+# name="head_5e-5"
 
 
 # ========================================================================
@@ -257,6 +281,7 @@ args=(
   "logging.wandb_name=$name"
   "logging.log_callback_data=$log_data"
   "train.max_steps=$steps"
+  "train.use_amp=$use_amp"
   "dataset.total_batch_size=$batch_size"
   "experimental=null"
   "test=null"
