@@ -15,48 +15,55 @@ import optax
 from typing import NamedTuple
 from jaxtyping import Array, PyTree
 
+import warnings
+
 from utils import tree_utils
 from optimizers.base import adamw
 from optimizers.combine import multi_transform
 from optimizers.schedule import get_current_lr
+from optimizers.muon.base import newton_schulz, LabelParamsFn
 
 
-def newton_schulz(G: Array, steps: int) -> Array:
-    """An approximate Newton-Schulz method.
+# =============================================================================
+# Label functions to partition GPT model.
+# =============================================================================
+
+def muon_label_params_default(params):
+    """Default way to partition layers.
     
-    Adapted from:
+    Following the default implementation from (Jordan, 2024)
 
-    https://github.com/KellerJordan/Muon/blob/master/muon.py
+    https://github.com/KellerJordan/Muon/blob/28c793b55ef1cf86e5d6091bfbdbe0029b11eabb/muon.py#L34
 
-    Given a matrix G with SVD decomposition SUV^T, this function
-    approximates US'V^T where S' is diagonal with values Uniform(0.5, 1.5)
-    without needing to compute any SVD decomposition.
+    Parses 1d arrays and embedding, head layers to adamw; and all other 2d arrays as muon.
     """
-    assert G.ndim == 2
+    def parse_path(path, p):
+        parts = [part.name for part in path if isinstance(part, jtu.GetAttrKey)]
+        muon_label = "muon"
+        adamw_label = "adamw"
+        # Detect embedding layers and head layers
+        if "token_embedding" in parts or "position_embedding" in parts:
+            return adamw_label
+        if "head" in parts:
+            return adamw_label
+        if p.ndim == 1:
+            return adamw_label
+        if p.ndim == 2:
+            return muon_label
+        raise ValueError(f"cannot categorize parameter: {p}")
+    return jtu.tree_map_with_path(parse_path, params) 
 
-    # NOTE: do we need to adapt to bfloat16 as in the OG repo?
-    a, b, c = (3.4445, -4.7750,  2.0315)
-    eps = 1e-7
 
-    X = G
-    if G.shape[0] > G.shape[1]:
-        X = X.T
-
-    # wrap iterative update with jax.lax.fori_loop.
-    X /= (jnp.linalg.norm(X, ord=2) + eps)
-    def body_func(i, val):
-        X = val
-        A = X @ X.T
-        B = b * A + c * A @ A
-        return a * X + B @ X
-    X = jax.lax.fori_loop(
-        0, steps, body_func, X
+def muon_label_params_by_dimension(params):
+    """A simplified label function that labels 2d arrays as muon and 1d arrays as adamw."""
+    return jtu.tree_map(
+        lambda p: "muon" if p.ndim == 2 else "adamw", params
     )
 
-    if G.shape[0] > G.shape[1]:
-        X = X.T
-    return X
 
+# =============================================================================
+# Main scale_by_muon and muon function.
+# =============================================================================
 
 class ScaleByMuonState(NamedTuple):
     """scale_by_muon state."""
@@ -124,6 +131,7 @@ def muon(
         adam_beta2: float = 0.95,
         adam_eps: float = 1e-8,
         adam_wd: float = 0.0,
+        label_params: LabelParamsFn | None = None
 ) -> optax.GradientTransformation:
     """The muon optimizer.
     
@@ -143,6 +151,8 @@ def muon(
         adam_eps: adam eps.
         adam_wd: adam weight decay.
     """
+    if label_params is None:
+        label_params = muon_label_params_default    # use default muon partition.
     optim_muon = scale_by_muon(
         learning_rate, momentum, nesterov, ns_steps
     )
@@ -156,12 +166,8 @@ def muon(
     )
     transforms = {
         "muon": optim_muon,
-        "adam": optim_adam,
+        "adamw": optim_adam,
     }
-    def label_params(params):
-        return jtu.tree_map(
-            lambda p: "muon" if p.ndim == 2 else "adam", params
-        )
     return multi_transform(transforms, label_params)
 
 
@@ -179,6 +185,8 @@ def muon_og(
         adam_wd: float = 0.0,
 ) -> optax.GradientTransformation:
     """The OG muon optimizer that doesn't apply newton-schulz on embedding nor head layers."""
+    warnings.warn("muon_og is deprecated. please use muon instead.",
+                  "define new label functions if necessary.")
     
     optim_muon = scale_by_muon(
         learning_rate, momentum, nesterov, ns_steps
