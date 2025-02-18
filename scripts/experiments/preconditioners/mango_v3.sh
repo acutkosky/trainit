@@ -94,10 +94,10 @@ mkdir -p $OUTPUT_PATH
 # ... NEW EXPERIMENTS OF COUPLED NORMALIZATION
 #     WITH GRAD_SQUARED PRECONDITIONING
 # ...... Fixed beta2=0.95
-beta2=0.95
-coupled_normalize=True
-coupled_normalize_power=0.5
-coupled_normalize_correct_bias=True
+# beta2=0.95
+# coupled_normalize=True
+# coupled_normalize_power=0.5
+# coupled_normalize_correct_bias=True
 
 # lr=0.03
 # lr=0.01
@@ -109,7 +109,100 @@ coupled_normalize_correct_bias=True
 # lr=1e-5
 # lr=3e-6
 # lr=1e-6
-name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
+# name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
+
+
+# ... SCALE_BY_TENSOR_NORM EXPERIMENTS
+# ...... Use relative norm scaling, scale only intermediate linear layers
+# NOTE: since we are using relative scaling, we do not worry about dimension factors.
+# mat_scale_norm="op"
+# attn_w_scale_norm="op"
+# scale_norm_power=1.0
+# scale_norm_ratio=True
+# scale_norm_clip_min=1e-4
+
+# lr=0.01
+# lr=0.03
+# lr=1e-3
+# lr=3e-3
+# lr=1e-4
+
+# name="mango_v3_scale_mat-attn_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+
+
+# ...... Relative norm scaling, scale only embedding layer
+# NOTE: we do not transpose the matrix, so the 1->inf norm on original
+# embedding matrix is just the row-max lr-norm.
+# embedding_scale_norm="rowmax_l2"
+
+# scale_norm_power=1.0
+# scale_norm_ratio=True
+# scale_norm_clip_min=1e-4
+
+# lr=0.01
+# lr=0.03
+# lr=1e-3
+# lr=3e-3
+# lr=1e-4
+
+# name="mango_v3_scale_emb_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+
+
+# ...... Relative norm scaling, scale only bias vectors.
+# attn_b_scale_norm="l2"
+# vec_b_scale_norm="l2"
+
+# scale_norm_power=1.0
+# scale_norm_ratio=True
+# scale_norm_clip_min=1e-4
+
+# lr=0.01
+# lr=0.03
+# lr=1e-3
+# lr=3e-3
+# lr=1e-4
+
+# name="mango_v3_scale_bias_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+
+
+# ...... Relative norm scaling, scale only LayerNorm weights.
+# vec_w_scale_norm="inf_"
+
+# scale_norm_power=1.0
+# scale_norm_ratio=True
+# scale_norm_clip_min=1e-4
+
+# lr=0.01
+# lr=0.03
+# lr=1e-3
+# lr=3e-3
+# lr=1e-4
+
+# name="mango_v3_scale_vecW_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+
+
+# ...... Relative norm scaling, scale all layers with proper tensor norms.
+mat_scale_norm="op"
+attn_w_scale_norm="op"
+head_scale_norm="op"
+embedding_scale_norm="rowmax_l2"
+vec_w_scale_norm="inf_"
+attn_b_scale_norm="l2"
+vec_b_scale_norm="l2"
+
+scale_norm_power=1.0
+scale_norm_ratio=True
+scale_norm_clip_min=1e-4
+
+lr=0.01
+lr=0.03
+lr=1e-3
+lr=3e-3
+lr=1e-4
+
+name="mango_v3_scale_all_p${scale_norm_power}_ratio${scale_norm_ratio}_lr${lr}"
+
+
 
 
 # ========================================================================
