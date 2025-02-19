@@ -69,13 +69,16 @@ class ScaleByMuonState(NamedTuple):
     """scale_by_muon state."""
     count: Array
     muon_momentum: optax.Updates
+    grad_squared_sum: optax.Updates
 
 
 def scale_by_muon(
         learning_rate: optax.ScalarOrSchedule = 0.05,
         momentum: float = 0.95,
+        beta2: float = 0.0,
         nesterov: bool = True,
         ns_steps: int = 6,
+        postcondition: bool = False,
 ) -> optax.GradientTransformation:
     """Muon update on parameters with 2d arrays."""
     
@@ -83,12 +86,24 @@ def scale_by_muon(
         return ScaleByMuonState(
             count = jnp.zeros([], dtype=jnp.int32),
             muon_momentum = tree_utils.zeros_like(params),
+            grad_squared_sum=tree_utils.zeros_like(params),
         )
     
     def update_fn(updates, state, params=None):
         del params
-        count = state.count
         muon_momentum = state.muon_momentum
+        grad_squared_sum = state.grad_squared_sum
+        count = state.count+1
+
+        if beta2:
+            grad_squared_sum = jtu.tree_map(
+                lambda v, g: beta2 * v + g**2 * (1-beta2), grad_squared_sum, updates)
+
+            updates = jtu.tree_map(
+                lambda v, g: g/(jnp.sqrt(v/(1-beta2**count)) + 1e-8),
+                grad_squared_sum,
+                updates
+            )
 
         # Update momentum.
         muon_momentum = jtu.tree_map(
@@ -104,6 +119,13 @@ def scale_by_muon(
         # Orthogonalize momentum matrix.
         updates = jtu.tree_map(
             lambda G: newton_schulz(G, steps=ns_steps), updates)
+
+        if postcondition:
+            updates = jtu.tree_map(
+                lambda v, u: u/(jnp.sqrt(v/(1-beta2**count)) + 1e-8),
+                grad_squared_sum,
+                updates
+            )
         
         # Additional scaling based on shape (see line 135).
         updates = jtu.tree_map(
@@ -114,8 +136,9 @@ def scale_by_muon(
         updates = tree_utils.scalar_dot(updates, -lr)
 
         return updates, ScaleByMuonState(
-            count = optax.safe_int32_increment(count),
-            muon_momentum = muon_momentum
+            count = count, #optax.safe_int32_increment(count),
+            muon_momentum = muon_momentum,
+            grad_squared_sum=grad_squared_sum,
         )
     
     return optax.GradientTransformation(init_fn, update_fn)
@@ -124,6 +147,8 @@ def scale_by_muon(
 def muon(
         learning_rate: optax.ScalarOrSchedule = 0.05,
         momentum: float = 0.95,
+        beta2: float = 0.0,
+        postcondition: bool = False,
         nesterov: bool = True,
         ns_steps: int = 6,
         adam_lr: optax.ScalarOrSchedule = 3e-4,
@@ -154,7 +179,7 @@ def muon(
     if label_params is None:
         label_params = muon_label_params_default    # use default muon partition.
     optim_muon = scale_by_muon(
-        learning_rate, momentum, nesterov, ns_steps
+        learning_rate, momentum, beta2, nesterov, ns_steps, postcondition=postcondition
     )
     optim_adam = adamw(
         learning_rate=adam_lr,

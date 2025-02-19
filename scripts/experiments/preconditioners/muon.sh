@@ -6,7 +6,7 @@ optimizer=muon
 # ========================================================================
 # Global Configs.
 # ========================================================================
-project=pile_baseline
+project=check_muon #pile_baseline
 
 log_data=False
 steps=2000
@@ -16,9 +16,12 @@ schedule=linear
 warmup=200
 const=null
 
+postcondition=True
+beta2=0.0
+
 # Make scc_outputs dir.
 exp_name=muon
-BASE_DIR=/projectnb/aclab/qinziz/trainit
+BASE_DIR=/projectnb/aclab/cutkosky/qinzitrainit/trainit/
 DATE=$(date +"%Y-%m-%d")
 OUTPUT_PATH=$BASE_DIR/scc_outputs/$DATE/$exp_name
 
@@ -29,9 +32,9 @@ mkdir -p $OUTPUT_PATH
 # Optimizer Configs.
 # ========================================================================
 
-lr=0.01
-adam_lr=0.01
-name="muon_lr${lr}_adam-lr_${adam_lr}"
+lr=0.03
+adam_lr=0.03
+name="muon_post${postcondition}_beta2${beta2}_lr${lr}_adam-lr_${adam_lr}"
 
 
 # ========================================================================
@@ -66,6 +69,7 @@ args=(
 
 optimizer_keys=(
     "momentum"
+    "beta2"
     "nesterov"
     "ns_steps"
     "adam_lr"
@@ -73,6 +77,7 @@ optimizer_keys=(
     "adam_beta2"
     "adam_eps"
     "adam_wd"
+    "postcondition"
 )
 
 # Update optimizer configs
