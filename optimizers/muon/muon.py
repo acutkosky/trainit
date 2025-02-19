@@ -164,6 +164,15 @@ def muon(
         weight_decay=adam_wd,
         use_nesterov=False,
     )
+    # NOTE: we could switch to optax implementation if needed.
+    # optim_adam = optax.adamw(
+    #     learning_rate=adam_lr,
+    #     b1=adam_beta1,
+    #     b2=adam_beta2,
+    #     eps=adam_eps,
+    #     weight_decay=adam_wd,
+    #     nesterov=False,
+    # )
     transforms = {
         "muon": optim_muon,
         "adamw": optim_adam,
