@@ -9,6 +9,7 @@ optimizer=muon
 project=pile_baseline
 
 log_data=False
+use_amp=True
 steps=2000
 batch_size=128
 
@@ -29,10 +30,31 @@ mkdir -p $OUTPUT_PATH
 # Optimizer Configs.
 # ========================================================================
 
-lr=0.01
-adam_lr=0.03
-# name="muon_lr${lr}_adam-lr_${adam_lr}"
-name="muon_baseline"
+# lr=0.01
+# adam_lr=0.03
+# # name="muon_lr${lr}_adam-lr_${adam_lr}"
+# name="muon_baseline"
+
+
+# lr=0.03
+# adam_lr=0.03
+# name="muon_lr${lr}_adam-lr${adam_lr}"
+
+# lr=0.03
+# adam_lr=0.03
+# beta2=0.95
+# name="precmuon_lr${lr}_adam-lr${adam_lr}"
+
+# lr=0.03
+# adam_lr=0.03
+# offset_beta=0.95
+# name="muon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
+
+# lr=0.03
+# adam_lr=0.03
+# beta2=0.95
+# offset_beta=0.95
+# name="precmuon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
 
 
 # ========================================================================
@@ -74,6 +96,10 @@ optimizer_keys=(
     "adam_beta2"
     "adam_eps"
     "adam_wd"
+    "beta2"
+    "p_pre"
+    "p_post"
+    "offset_beta"
 )
 
 # Update optimizer configs

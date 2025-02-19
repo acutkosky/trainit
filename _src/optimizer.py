@@ -220,7 +220,11 @@ def init_optimizer(
             adam_beta1=config.adam_beta1,
             adam_beta2=config.adam_beta2,
             adam_eps=config.adam_eps,
-            adam_wd=config.adam_wd
+            adam_wd=config.adam_wd,
+            beta2=config.beta2,
+            p_pre=config.p_pre,
+            p_post=config.p_post,
+            offset_beta=config.offset_beta,
         )
     
     def init_muon_og(config: DictConfig):

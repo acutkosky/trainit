@@ -13,3 +13,9 @@ adam_beta1: 0.95
 adam_beta2: 0.95
 adam_eps: 1e-8
 adam_wd: 0.0
+
+# new configs
+beta2: 0.0
+p_pre: 0.5
+p_post: 0.0
+offset_beta: 0.0

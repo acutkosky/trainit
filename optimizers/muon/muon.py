@@ -21,7 +21,8 @@ from utils import tree_utils
 from optimizers.base import adamw
 from optimizers.combine import multi_transform
 from optimizers.schedule import get_current_lr
-from optimizers.muon.base import newton_schulz, LabelParamsFn
+from optimizers.muon.base import newton_schulz, LabelParamsFn, scale_by_offset
+from optimizers.muon.mango import normalize_with_grad_squared
 
 
 # =============================================================================
@@ -125,6 +126,10 @@ def muon(
         learning_rate: optax.ScalarOrSchedule = 0.05,
         momentum: float = 0.95,
         nesterov: bool = True,
+        beta2: float = 0.0,
+        p_pre: float = 0.5,
+        p_post: float = 0.0,
+        offset_beta: float = 0.0,
         ns_steps: int = 6,
         adam_lr: optax.ScalarOrSchedule = 3e-4,
         adam_beta1: float = 0.95,
@@ -153,9 +158,28 @@ def muon(
     """
     if label_params is None:
         label_params = muon_label_params_default    # use default muon partition.
-    optim_muon = scale_by_muon(
-        learning_rate, momentum, nesterov, ns_steps
-    )
+    if not beta2:
+        optim_muon = scale_by_muon(
+            learning_rate, momentum, nesterov, ns_steps
+        )
+    else:
+        def normalize(G):
+            G = newton_schulz(G, steps=ns_steps)
+            G = G * max(1, G.shape[0]/G.shape[1])**0.5
+        optim_muon = optax.trace(decay=momentum, nesterov=nesterov)
+        optim_muon = normalize_with_grad_squared(
+            inner=optim_muon,
+            normalize_fn=normalize,
+            beta=beta2,
+            eps=1e-8, 
+            power_pre=p_pre,
+            power_post=p_post,
+            correct_bias=True,
+        )
+        optim_muon = optax.chain(
+            optim_muon,
+            optax.scale_by_learning_rate(learning_rate)
+        )
     optim_adam = adamw(
         learning_rate=adam_lr,
         beta1=adam_beta1,
@@ -177,7 +201,13 @@ def muon(
         "muon": optim_muon,
         "adamw": optim_adam,
     }
-    return multi_transform(transforms, label_params)
+    optim = multi_transform(transforms, label_params)
+    if offset_beta:
+        optim = optax.chain(
+            optim,
+            scale_by_offset(offset_beta),
+        )
+    return optim
 
 
 def muon_og(
