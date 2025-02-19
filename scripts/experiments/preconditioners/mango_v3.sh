@@ -271,7 +271,8 @@ keys=(
   "offset_beta"
   "igt_scale"
   "coupled_normalize"
-  "coupled_normalize_power"
+  "coupled_normalize_power_pre"
+  "coupled_normalize_power_post"
   "coupled_normalize_correct_bias"
 )
 

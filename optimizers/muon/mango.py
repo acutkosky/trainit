@@ -46,7 +46,8 @@ def normalize_with_grad_squared(
         normalize_fn: NormalizeFn,
         beta: float = 0.0,
         eps: float = 1e-8,
-        power: float = 0.5,
+        power_pre: float = 0.5,
+        power_post: float = 0.5,
         correct_bias: bool = True,
 ) -> optax.GradientTransformation:
     """Normalize with grad_squared wrapper.
@@ -61,13 +62,20 @@ def normalize_with_grad_squared(
     where Y can be found by `normalize_fn`.
     
     This corresponds to the following work flow:
-        1. Update preoonditioner V = V*beta + g**2,
+        1. Update preoonditioner V = V*beta + (1-beta)*g**2,
         2. Call inner optimizer and get update U,
         3. Precondition U -> U / sqrt(V),
         3. Normalize U,
         4. Precondition U again U -> U / sqrt(V).
     
     In general, we can replace sqrt(V) with arbitrary power, V**p.
+    Moreover, we implement unbalanced power for pre- and post-conditioning.
+    The final update looks like the following:
+        1. Update V = V*beta + (1-beta)*g**2,
+        2. U = inner.update(),
+        3. U = U / V**p_{pre},
+        4. U = normalize(U),
+        5. U = U / V**p_{post}.
     """
     def init_fn(params):
         return NormalizeWithGradSquaredState(
@@ -91,9 +99,9 @@ def normalize_with_grad_squared(
                 count=count_inc, grad_squared=grad_squared, inner_state=inner_state
             )
 
-        # NOTE: for now, we implemented the series notion,
-        # instead of the EMA notion v*beta + (1-beta)*g**2. 
-        update_grad_squared = lambda v, g: v*beta + g**2
+        # NOTE: initially we implemented the series notion v*beta + g**2.
+        # we now changed to EMA notion v*beta + (1-beta)*g**2. 
+        update_grad_squared = lambda v, g: v*beta + (1-beta)*g**2
         # NOTE: numerical stability could be an issue if we use
         # arbitrary power and jnp.power(). 
         # For now, we probably could interest in sqrt(V) or V**0.25. 
@@ -101,18 +109,24 @@ def normalize_with_grad_squared(
             bias_correction = lambda v: v / (1 - beta**count_inc)
         else:
             bias_correction = lambda v: v
-        if power == 0.5:
-            precondition = lambda u, v: u / (jnp.sqrt(bias_correction(v)) + eps)
-        elif power == 0.25:
-            precondition = lambda u, v: u / (jnp.sqrt(jnp.sqrt(bias_correction(v))) + eps)
-        else:
-            precondition = lambda u, v: u / (jnp.power(bias_correction(v), power) + eps)
+        def get_condition_fn(power):
+            if power == 0.0:
+                condition_fn = lambda u, v: u
+            elif power == 0.5:
+                condition_fn = lambda u, v: u / (jnp.sqrt(bias_correction(v)) + eps)
+            elif power == 0.25:
+                condition_fn = lambda u, v: u / (jnp.sqrt(jnp.sqrt(bias_correction(v))) + eps)
+            else:
+                condition_fn = lambda u, v: u / (jnp.power(bias_correction(v), power) + eps)
+            return condition_fn
+        precondition = get_condition_fn(power_pre)
+        postcondition = get_condition_fn(power_post)
 
         grad_squared = jtu.tree_map(update_grad_squared, grad_squared, updates)
         updates, inner_state = inner.update(updates, inner_state, params)
         updates = jtu.tree_map(precondition, updates, grad_squared)
         updates = jtu.tree_map(normalize_fn, updates)
-        updates = jtu.tree_map(precondition, updates, grad_squared)
+        updates = jtu.tree_map(postcondition, updates, grad_squared)
 
         return updates, NormalizeWithGradSquaredState(
             count=count_inc, grad_squared=grad_squared, inner_state=inner_state
@@ -729,7 +743,8 @@ def mango_core(
         offset_beta: float = 0.0,
         igt_scale: float = 0.0,
         coupled_normalize: bool = False,
-        coupled_normalize_power: float = 0.5,
+        coupled_normalize_power_pre: float = 0.5,
+        coupled_normalize_power_post: float = 0.5,
         coupled_normalize_correct_bias: bool = True,
 ):
     # Base optimizer: AdamW or LaProp
@@ -773,7 +788,8 @@ def mango_core(
                 normalize_fn=normalize_fn, 
                 beta=beta2,
                 eps=eps, 
-                power=coupled_normalize_power,
+                power_pre=coupled_normalize_power_pre,
+                power_post=coupled_normalize_power_post,
                 correct_bias=coupled_normalize_correct_bias,
             )
         else:

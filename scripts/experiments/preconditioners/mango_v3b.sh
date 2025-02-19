@@ -52,6 +52,15 @@ embedding_scale_dim=True
 # name="mango_v3b_baseline"
 
 
+# O. Mango baselines
+# O.a. Baseline with larger lrs.
+# lr=0.03
+# bias_lr=0.01
+# attn_b_lr=$bias_lr
+# vec_b_lr=$bias_lr
+# name="mango_v3b_lr${lr}_bias${bias_lr}"
+
+
 # I. Tuning learning rates of each layer
 # I.a. Embedding
 # candidates=(0.03 3e-3 1e-3 3e-4)
@@ -79,6 +88,21 @@ embedding_scale_dim=True
 # candidates=(0.03 3e-3)
 # vec_w_lr=${candidates[-1]}
 # name="mango_v3b_vecw-lr${vec_w_lr}"
+
+
+# II. Testing coupled normalization (pre- and post-conditioning) of each layer
+# II.0. San-check
+#       We should recover the performance of adam-muon with coupled normalization.
+offset_beta=0.0
+coupled_normalize=True
+embedding_normalize=null
+head_normalize=null
+attn_b_normalize=null
+vec_b_normalize=null
+lr=0.03
+
+# name="mango_v3b_recovers_precmuon"
+
 
 
 # ========================================================================
@@ -121,7 +145,8 @@ keys=(
   "offset_beta"
   "igt_scale"
   "coupled_normalize"
-  "coupled_normalize_power"
+  "coupled_normalize_power_pre"
+  "coupled_normalize_power_post"
   "coupled_normalize_correct_bias"
 )
 
