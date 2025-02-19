@@ -102,24 +102,24 @@ mkdir -p $OUTPUT_PATH
 # ... NEW EXPERIMENTS OF COUPLED NORMALIZATION
 #     WITH GRAD_SQUARED PRECONDITIONING
 # ...... Fixed beta2=0.95
-beta2=0.95
-coupled_normalize=True
-coupled_normalize_power=0.5
-coupled_normalize_correct_bias=True
+# beta2=0.95
+# coupled_normalize=True
+# coupled_normalize_power=0.5
+# coupled_normalize_correct_bias=True
 
-# lr=0.03
-# lr=0.01
-# lr=3e-3
-# lr=1e-3
-# lr=3e-4
-# lr=1e-4
-# lr=3e-5
-lr=1e-5
-# lr=3e-6
-# lr=1e-6
-# name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
-use_amp=False
-name="mango_v3_coupled-no-amp_p${coupled_normalize_power}_lr${lr}"
+# # lr=0.03
+# # lr=0.01
+# # lr=3e-3
+# # lr=1e-3
+# # lr=3e-4
+# # lr=1e-4
+# # lr=3e-5
+# lr=1e-5
+# # lr=3e-6
+# # lr=1e-6
+# # name="mango_v3_coupled_beta2${beta2}_p${coupled_normalize_power}_lr${lr}"
+# use_amp=False
+# name="mango_v3_coupled-no-amp_p${coupled_normalize_power}_lr${lr}"
 
 
 # ... SCALE_BY_TENSOR_NORM EXPERIMENTS

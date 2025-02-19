@@ -30,8 +30,9 @@ mkdir -p $OUTPUT_PATH
 # ========================================================================
 
 lr=0.01
-adam_lr=0.01
-name="muon_lr${lr}_adam-lr_${adam_lr}"
+adam_lr=0.03
+# name="muon_lr${lr}_adam-lr_${adam_lr}"
+name="muon_baseline"
 
 
 # ========================================================================
