@@ -147,6 +147,8 @@ def scale_by_offset(
     update = update + offset
     ```
     """
+    if not beta:
+        return optax.identity()
 
     def init_fn(params):
         return ScaleByOffsetState(

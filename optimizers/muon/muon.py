@@ -166,6 +166,7 @@ def muon(
         def normalize(G):
             G = newton_schulz(G, steps=ns_steps)
             G = G * max(1, G.shape[0]/G.shape[1])**0.5
+            return G
         optim_muon = optax.trace(decay=momentum, nesterov=nesterov)
         optim_muon = normalize_with_grad_squared(
             inner=optim_muon,

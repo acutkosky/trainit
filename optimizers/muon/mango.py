@@ -37,7 +37,7 @@ def scale_by_normalization(normalize, **kwargs):
 class NormalizeWithGradSquaredState(NamedTuple):
     """normalize_with_grad_squared wrapper state."""
     count: Array
-    grad_squared: Optional[optax.Updates]
+    grad_squared: optax.Updates
     inner_state: optax.OptState
 
 
@@ -47,7 +47,7 @@ def normalize_with_grad_squared(
         beta: float = 0.0,
         eps: float = 1e-8,
         power_pre: float = 0.5,
-        power_post: float = 0.5,
+        power_post: float = 0.0,
         correct_bias: bool = True,
 ) -> optax.GradientTransformation:
     """Normalize with grad_squared wrapper.
@@ -77,10 +77,13 @@ def normalize_with_grad_squared(
         4. U = normalize(U),
         5. U = U / V**p_{post}.
     """
+    if not beta:
+        return inner
+
     def init_fn(params):
         return NormalizeWithGradSquaredState(
             count=jnp.zeros([], dtype=jnp.int32),
-            grad_squared=tree_utils.zeros_like(params) if beta else None,
+            grad_squared=tree_utils.zeros_like(params),
             inner_state=inner.init(params),
         )
     
@@ -90,14 +93,6 @@ def normalize_with_grad_squared(
         inner_state = state.inner_state
 
         count_inc = optax.safe_int32_increment(count)
-
-        # Special case when beta = 0:
-        if not beta:
-            updates, inner_state = inner.update(updates, inner_state, params)
-            updates = jtu.tree_map(normalize_fn, updates)
-            return updates, NormalizeWithGradSquaredState(
-                count=count_inc, grad_squared=grad_squared, inner_state=inner_state
-            )
 
         # NOTE: initially we implemented the series notion v*beta + g**2.
         # we now changed to EMA notion v*beta + (1-beta)*g**2. 
