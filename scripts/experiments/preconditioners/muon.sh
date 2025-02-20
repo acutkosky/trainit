@@ -41,20 +41,38 @@ mkdir -p $OUTPUT_PATH
 # name="muon_lr${lr}_adam-lr${adam_lr}"
 
 # lr=0.03
-# adam_lr=0.03
+# adam_lr=0.05 #0.03
 # beta2=0.95
 # name="precmuon_lr${lr}_adam-lr${adam_lr}"
 
-# lr=0.03
+# lr=0.01 #0.03
 # adam_lr=0.03
 # offset_beta=0.95
 # name="muon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
 
-# lr=0.03
+# lr=0.01 #0.03
 # adam_lr=0.03
 # beta2=0.95
 # offset_beta=0.95
 # name="precmuon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
+
+
+# beta2=0.95
+# p_pre=0.25
+# p_post=0.25
+# lrs=(0.03 0.01 1e-3 3e-3)
+# lr=${lrs[-1]}
+# adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+
+
+# beta2=0.95
+# p_pre=0.5
+# p_post=0.5
+# lrs=(0.03 0.01 1e-3 3e-3)
+# lr=${lrs[-1]}
+# adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # ========================================================================
