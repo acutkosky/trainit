@@ -49,6 +49,7 @@ def normalize_with_grad_squared(
         power_pre: float = 0.5,
         power_post: float = 0.0,
         correct_bias: bool = True,
+        stabilize_postcond: str = "",
 ) -> optax.GradientTransformation:
     """Normalize with grad_squared wrapper.
 
@@ -99,23 +100,31 @@ def normalize_with_grad_squared(
         update_grad_squared = lambda v, g: v*beta + (1-beta)*g**2
         # NOTE: numerical stability could be an issue if we use
         # arbitrary power and jnp.power(). 
-        # For now, we probably could interest in sqrt(V) or V**0.25. 
-        if correct_bias:
-            bias_correction = lambda v: v / (1 - beta**count_inc)
-        else:
-            bias_correction = lambda v: v
-        def get_condition_fn(power):
+        # For now, we probably could interest in sqrt(V) or V**0.25.
+        bias_correction = lambda v: v / (1 - beta**count_inc)
+        stabilize_rms = lambda v: v / (jnp.linalg.norm(v, ord="fro") / (v.shape[0]*v.shape[1])**0.5)
+        def get_cond_scaling(power, correct_bias, stabilize=""):
+            def preprocess(v):
+                if stabilize == "rms":
+                    v = stabilize_rms(v)
+                if correct_bias:
+                    v = bias_correction(v)
+                return v
             if power == 0.0:
-                condition_fn = lambda u, v: u
+                scale_fn = lambda v: 1
             elif power == 0.5:
-                condition_fn = lambda u, v: u / (jnp.sqrt(bias_correction(v)) + eps)
+                scale_fn = lambda u, v: u / (jnp.sqrt(preprocess(v)) + eps)
             elif power == 0.25:
-                condition_fn = lambda u, v: u / (jnp.sqrt(jnp.sqrt(bias_correction(v))) + eps)
+                scale_fn = lambda u, v: u / (jnp.sqrt(jnp.sqrt(preprocess(v))) + eps)
             else:
-                condition_fn = lambda u, v: u / (jnp.power(bias_correction(v), power) + eps)
+                scale_fn = lambda u, v: u / (jnp.power(preprocess(v), power) + eps)
+            return scale_fn
+        def get_condition_fn(**kwargs):
+            scale_fn = get_cond_scaling(**kwargs)
+            condition_fn = lambda u, v: u / scale_fn(v)
             return condition_fn
-        precondition = get_condition_fn(power_pre)
-        postcondition = get_condition_fn(power_post)
+        precondition = get_condition_fn(power_pre, correct_bias)
+        postcondition = get_condition_fn(power_post, correct_bias, stabilize_postcond)
 
         grad_squared = jtu.tree_map(update_grad_squared, grad_squared, updates)
         updates, inner_state = inner.update(updates, inner_state, params)

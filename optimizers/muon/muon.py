@@ -176,6 +176,7 @@ def muon(
             power_pre=p_pre,
             power_post=p_post,
             correct_bias=True,
+            stabilize_postcond="rms",
         )
         optim_muon = optax.chain(
             optim_muon,

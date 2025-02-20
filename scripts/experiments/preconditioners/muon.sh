@@ -40,8 +40,8 @@ mkdir -p $OUTPUT_PATH
 # adam_lr=0.03
 # name="muon_lr${lr}_adam-lr${adam_lr}"
 
-# lr=0.03
-# adam_lr=0.05 #0.03
+# lr=0.05 #0.03
+# adam_lr=0.03
 # beta2=0.95
 # name="precmuon_lr${lr}_adam-lr${adam_lr}"
 
@@ -60,8 +60,8 @@ mkdir -p $OUTPUT_PATH
 # beta2=0.95
 # p_pre=0.25
 # p_post=0.25
-# lrs=(0.03 0.01 1e-3 3e-3)
-# lr=${lrs[-1]}
+# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4 3e-5)
+# lr=${lrs[-3]}
 # adam_lr=0.03
 # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
@@ -70,6 +70,33 @@ mkdir -p $OUTPUT_PATH
 # p_pre=0.5
 # p_post=0.5
 # lrs=(0.03 0.01 1e-3 3e-3)
+# lr=${lrs[-1]}
+# adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+
+
+# beta2=0.95
+# p_pre=0.0
+# p_post=0.5
+# lrs=(0.03 0.01 1e-3 3e-3)
+# lr=${lrs[3]}
+# adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+
+
+# beta2=0.95
+# p_pre=0.0
+# p_post=0.1
+# lrs=(0.03 0.01 1e-3 3e-3)
+# lr=${lrs[3]}
+# adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+
+
+# beta2=0.95
+# p_pre=0.0
+# p_post=0.25
+# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4)
 # lr=${lrs[-1]}
 # adam_lr=0.03
 # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
@@ -148,6 +175,6 @@ EOF
 # Save job id and associated name to local .txt
 # This is extremely helpful to manage a bunch of experiments.
 job_id=$(echo "$job_output" | awk '{print $3}')
-echo "job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+echo "$(date '+%Y-%m-%d %H:%M:%S') job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
 
 echo "Submitted job: $name"
