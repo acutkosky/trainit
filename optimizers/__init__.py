@@ -27,6 +27,7 @@ from optimizers.muon.muon import scale_by_muon
 from optimizers.muon.muon import (
     muon,
     muon_og,
+    muon_p,
 )
 from optimizers.muon.muon_laprop import (
     muon_laprop,

@@ -22,7 +22,7 @@ from optimizers.base import adamw
 from optimizers.combine import multi_transform
 from optimizers.schedule import get_current_lr
 from optimizers.muon.base import newton_schulz, LabelParamsFn, scale_by_offset
-from optimizers.muon.mango import normalize_with_grad_squared
+from optimizers.muon.mango import normalize_with_grad_squared, scale_by_function
 
 
 # =============================================================================
@@ -277,4 +277,65 @@ def muon_og(
             return parse_table[get_layer(path, p)]
         return jtu.tree_map_with_path(fn, params) 
     return multi_transform(transforms, label_params)
+
+
+def general_newton_schulz(G, p):
+    """Normalizes by 
     
+    Using SVD now for test of idea."""
+    U, S, Vh = jnp.linalg.svd(G)
+
+    # Normalization w.r.t. ell-p vector norm.
+    q = p / (p-1)
+    ratio = 1 / (p-1)
+    S = (S / jnp.linalg.norm(S, ord=1)) ** ratio
+
+    # SVD on G and tranlate to diagonal matrix.
+    k = min(G.shape[0], G.shape[1])
+    S = jnp.zeros_like(G).at[jnp.arange(k), jnp.arange(k)].set(S)
+
+    return U@S@Vh
+
+
+def muon_p(
+        learning_rate: optax.ScalarOrSchedule = 0.05,
+        momentum: float = 0.95,
+        nesterov: bool = True,
+        schatten_p: float = 2,
+        ns_steps: int = 6,
+        adam_lr: optax.ScalarOrSchedule = 3e-4,
+        adam_beta1: float = 0.95,
+        adam_beta2: float = 0.95,
+        adam_eps: float = 1e-8,
+        adam_wd: float = 0.0,
+        label_params: LabelParamsFn | None = None
+) -> optax.GradientTransformation:
+    """Muon with newton-schulz replaced with normalization
+    w.r.t. Schatten-p norm. p=inf recovers muon, and p=2 recovers normalized by frobenius norm.
+    """
+    if label_params is None:
+        label_params = muon_label_params_default    # use default muon partition.
+        
+    def normalize(G):
+        G = general_newton_schulz(G, schatten_p)
+        G = G * max(1, G.shape[0]/G.shape[1])**0.5
+        return G
+    optim_muon = optax.chain(
+        optax.trace(decay=momentum, nesterov=nesterov),
+        scale_by_function(normalize),
+        optax.scale_by_learning_rate(learning_rate),
+    )
+    optim_adam = adamw(
+        learning_rate=adam_lr,
+        beta1=adam_beta1,
+        beta2=adam_beta2,
+        eps=adam_eps,
+        weight_decay=adam_wd,
+        use_nesterov=False,
+    )
+    transforms = {
+        "muon": optim_muon,
+        "adamw": optim_adam,
+    }
+    optim = multi_transform(transforms, label_params)
+    return optim
