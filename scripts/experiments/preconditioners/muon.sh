@@ -57,16 +57,28 @@ mkdir -p $OUTPUT_PATH
 # name="precmuon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
 
 
-beta2=0.95
-p_pre=0.25
-p_post=0.25
-lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4 3e-5)
-lr=${lrs[1]}
-adam_lr=0.03
-# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
-stabilize="rms"
-# name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
-name="muonstable0.2_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# beta2=0.95
+# p_pre=0.25
+# p_post=0.25
+# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4 3e-5)
+# lr=${lrs[3]}
+# adam_lr=0.03
+# # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # stabilize="rms"
+# # # name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # name="muonstable0.2_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="mean"
+# name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+
+
+# beta2=0.95
+# p_pre=0.0
+# p_post=0.25
+# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4)
+# lr=${lrs[3]}
+# adam_lr=0.03
+# # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 # stabilize="mean"
 # name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
@@ -78,7 +90,9 @@ name="muonstable0.2_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 # lr=${lrs[3]}
 # adam_lr=0.03
 # # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
-# name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="mean"
+# name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # beta2=0.95
@@ -89,25 +103,34 @@ name="muonstable0.2_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 # adam_lr=0.03
 # # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 # name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="mean"
+# name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # beta2=0.95
 # p_pre=0.0
 # p_post=0.1
-# lrs=(0.03 0.01 1e-3 3e-3)
-# lr=${lrs[3]}
+# lrs=(0.03 0.01 3e-3 1e-3)
+# lr=${lrs[2]}
 # adam_lr=0.03
-# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="rms"
+# name="muonstable0.2-rms_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # stabilize="mean"
+# # name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # beta2=0.95
-# p_pre=0.0
-# p_post=0.25
-# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4)
+# p_pre=0.5
+# p_post=0.1
+# lrs=(0.03 0.01 3e-3 1e-3)
 # lr=${lrs[3]}
 # adam_lr=0.03
 # # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
-# name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="rms"
+# name="muonstable0.2-rms_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# # stabilize="mean"
+# # name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # ========================================================================
@@ -161,29 +184,29 @@ for key in "${optimizer_keys[@]}"; do
     args+=( "$(parse "optimizer.${key}" "${key}")" )
 done
 
-# python main.py ${args[@]}
-
-job_output=$(qsub <<EOF
-#!/bin/bash -l
-
-#$ -pe omp 8
-#$ -l gpus=1
-#$ -l gpu_type=L40S     # Specifies the gpu type.
-#$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
-#$ -N "$name".sh
-#$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
-#$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
-
-sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
-
-source activate_env.sh
 python main.py ${args[@]}
-EOF
-)
 
-# Save job id and associated name to local .txt
-# This is extremely helpful to manage a bunch of experiments.
-job_id=$(echo "$job_output" | awk '{print $3}')
-echo "$(date '+%Y-%m-%d %H:%M:%S') job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+# job_output=$(qsub <<EOF
+# #!/bin/bash -l
 
-echo "Submitted job: $name"
+# #$ -pe omp 8
+# #$ -l gpus=1
+# #$ -l gpu_type=L40S     # Specifies the gpu type.
+# #$ -l h_rt=8:00:00      # Specifies the hard time limit for the job
+# #$ -N "$name".sh
+# #$ -o $OUTPUT_PATH/\$JOB_NAME.o\$JOB_ID     # Escape environment variables with \$
+# #$ -e $OUTPUT_PATH/\$JOB_NAME.e\$JOB_ID
+
+# sleep $(((RANDOM % 1000) / 100))   # Prevents simultaneous reads of loadit dataset
+
+# source activate_env.sh
+# python main.py ${args[@]}
+# EOF
+# )
+
+# # Save job id and associated name to local .txt
+# # This is extremely helpful to manage a bunch of experiments.
+# job_id=$(echo "$job_output" | awk '{print $3}')
+# echo "$(date '+%Y-%m-%d %H:%M:%S') job_id: ${job_id} || ${name}" >> "${OUTPUT_PATH}/job_list.txt"
+
+# echo "Submitted job: $name"

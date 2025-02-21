@@ -8,6 +8,7 @@ import optax
 
 from typing import NamedTuple, Optional, Callable, Literal, Dict, Tuple
 from jaxtyping import Array, PyTree
+import logging
 
 from utils import tree_utils
 from optimizers.combine import multi_transform
@@ -108,10 +109,19 @@ def normalize_with_grad_squared(
             def preprocess(v):
                 if stabilize == "rms":
                     v = stabilize_rms(v)
+                    # logging.info("Condition stabilized by RMS norm.")
                 elif stabilize == "mean":
                     v =stabilize_mean(v)
+                    # logging.info("Condition stabilized by mean norm.")
+                else:
+                    # logging.info("Condition not stabilized.")
+                    pass
                 if correct_bias:
                     v = bias_correction(v)
+                    # logging.info("Condition bias corrected.")
+                else:
+                    # logging.info("Condition not bias corrected.")
+                    pass
                 return v
             if power == 0.0:
                 condition_fn = lambda u, v: u
