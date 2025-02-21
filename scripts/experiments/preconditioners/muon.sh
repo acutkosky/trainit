@@ -57,14 +57,18 @@ mkdir -p $OUTPUT_PATH
 # name="precmuon_lr${lr}_adam-lr${adam_lr}_offset${offset_beta}"
 
 
-# beta2=0.95
-# p_pre=0.25
-# p_post=0.25
-# lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4 3e-5)
-# lr=${lrs[3]}
-# adam_lr=0.03
-# # name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+beta2=0.95
+p_pre=0.25
+p_post=0.25
+lrs=(0.03 0.01 3e-3 1e-3 3e-4 1e-4 3e-5)
+lr=${lrs[1]}
+adam_lr=0.03
+# name="muon_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+stabilize="rms"
 # name="muonstable_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+name="muonstable0.2_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
+# stabilize="mean"
+# name="muonstable0.2-mean_p${p_pre}-${p_post}_lr${lr}-${adam_lr}"
 
 
 # beta2=0.95
@@ -148,6 +152,7 @@ optimizer_keys=(
     "beta2"
     "p_pre"
     "p_post"
+    "stabilize"
     "offset_beta"
 )
 
