@@ -1,7 +1,7 @@
 # An optax implementation of muon optimizer from:
-# 
+#
 # https://github.com/KellerJordan/Muon
-# 
+#
 # This implementation adapts the pytorch optimizer
 # to an optax.GradientTransformation object.
 
@@ -28,15 +28,17 @@ from optimizers.muon.base import newton_schulz, LabelParamsFn
 # Label functions to partition GPT model.
 # =============================================================================
 
+
 def muon_label_params_default(params):
     """Default way to partition layers.
-    
+
     Following the default implementation from (Jordan, 2024)
 
     https://github.com/KellerJordan/Muon/blob/28c793b55ef1cf86e5d6091bfbdbe0029b11eabb/muon.py#L34
 
     Parses 1d arrays and embedding, head layers to adamw; and all other 2d arrays as muon.
     """
+
     def parse_path(path, p):
         parts = [part.name for part in path if isinstance(part, jtu.GetAttrKey)]
         muon_label = "muon"
@@ -51,115 +53,149 @@ def muon_label_params_default(params):
         if p.ndim == 2:
             return muon_label
         raise ValueError(f"cannot categorize parameter: {p}")
-    return jtu.tree_map_with_path(parse_path, params) 
+
+    return jtu.tree_map_with_path(parse_path, params)
 
 
 def muon_label_params_by_dimension(params):
     """A simplified label function that labels 2d arrays as muon and 1d arrays as adamw."""
-    return jtu.tree_map(
-        lambda p: "muon" if p.ndim == 2 else "adamw", params
-    )
+    return jtu.tree_map(lambda p: "muon" if p.ndim == 2 else "adamw", params)
 
 
 # =============================================================================
 # Main scale_by_muon and muon function.
 # =============================================================================
 
+
 class ScaleByMuonState(NamedTuple):
     """scale_by_muon state."""
+
     count: Array
     muon_momentum: optax.Updates
     grad_squared_sum: optax.Updates
 
 
 def scale_by_muon(
-        learning_rate: optax.ScalarOrSchedule = 0.05,
-        momentum: float = 0.95,
-        beta2: float = 0.0,
-        nesterov: bool = True,
-        ns_steps: int = 6,
-        postcondition: bool = False,
+    learning_rate: optax.ScalarOrSchedule = 0.05,
+    momentum: float = 0.95,
+    beta2: float = 0.0,
+    nesterov: bool = True,
+    ns_steps: int = 6,
+    postcondition: bool = False,
+    condition_power: float = 0.5,
+    condition_grad_power: float = 2,
 ) -> optax.GradientTransformation:
     """Muon update on parameters with 2d arrays."""
-    
+
     def init_fn(params):
         return ScaleByMuonState(
-            count = jnp.zeros([], dtype=jnp.int32),
-            muon_momentum = tree_utils.zeros_like(params),
+            count=jnp.zeros([], dtype=jnp.int32),
+            muon_momentum=tree_utils.zeros_like(params),
             grad_squared_sum=tree_utils.zeros_like(params),
         )
-    
+
     def update_fn(updates, state, params=None):
         del params
         muon_momentum = state.muon_momentum
         grad_squared_sum = state.grad_squared_sum
-        count = state.count+1
-
-        if beta2:
-            grad_squared_sum = jtu.tree_map(
-                lambda v, g: beta2 * v + g**2 * (1-beta2), grad_squared_sum, updates)
-
-            updates = jtu.tree_map(
-                lambda v, g: g/(jnp.sqrt(v/(1-beta2**count)) + 1e-8),
-                grad_squared_sum,
-                updates
-            )
+        count = state.count + 1
 
         # Update momentum.
         muon_momentum = jtu.tree_map(
-            lambda mu, g: momentum * mu + g, muon_momentum, updates)
+            lambda mu, g: momentum * mu + g, muon_momentum, updates
+        )
 
         # Apply nesterov's momentum before applying normalization.
         if nesterov:
             updates = jtu.tree_map(
-                lambda mu, g: momentum * mu + g, muon_momentum, updates)
+                lambda mu, g: momentum * mu + g, muon_momentum, updates
+            )
         else:
             updates = muon_momentum
 
+        if beta2:
+            grad_squared_sum = jtu.tree_map(
+                lambda v, g: beta2 * v + g ** (condition_grad_power) * (1 - beta2),
+                grad_squared_sum,
+                updates,
+            )
+            if condition_power == 0.5:
+                rms = jax.tree.map(
+                    lambda v: jnp.sqrt(v / (1 - beta2**count)), grad_squared_sum
+                )
+            elif condition_power == 0.25:
+                rms = jax.tree.map(
+                    lambda v: jnp.sqrt(jnp.sqrt(v / (1 - beta2**count))),
+                    grad_squared_sum,
+                )
+            else:
+                rms = jax.tree.map(
+                    lambda v: jnp.power(v / (1 - beta2**count), condition_power),
+                    grad_squared_sum,
+                )
+
+            updates = jtu.tree_map(lambda r, g: g / (r + 1e-8), rms, updates)
         # Orthogonalize momentum matrix.
-        updates = jtu.tree_map(
-            lambda G: newton_schulz(G, steps=ns_steps), updates)
+        updates = jtu.tree_map(lambda G: newton_schulz(G, steps=ns_steps), updates)
 
         if postcondition:
             updates = jtu.tree_map(
-                lambda v, u: u/(jnp.sqrt(v/(1-beta2**count)) + 1e-8),
-                grad_squared_sum,
-                updates
+                lambda u, r: u / (r + 1e-8),
+                updates,
+                rms,
             )
-        
+            if postcondition == "scalefreeinf":
+                max_rms = jax.tree.map(jnp.max, rms)
+                updates = jtu.tree_map(lambda u, m: u * m, updates, max_rms)
+            if postcondition == "scalefreemean":
+                mean_rms = jax.tree.map(jnp.mean, rms)
+                updates = jtu.tree_map(lambda u, s: u * s, updates, mean_rms)
+            if postcondition == "scalefreerms":
+                mean_rms = jax.tree.map(lambda x: jnp.sqrt(jnp.mean(x**2)), rms)
+                updates = jtu.tree_map(lambda u, s: u * s, updates, mean_rms)
+            if postcondition == "scalefreel1":
+                l1_rms = jax.tree.map(jnp.sum, rms)
+                updates = jtu.tree_map(lambda u, s: u * s, updates, l1_rms)
+            if postcondition == "scalefreel2":
+                l2_rms = jax.tree.map(lambda x: jnp.linalg.norm(x, ord="fro"), rms)
+                updates = jtu.tree_map(lambda u, s: u * s, updates, l2_rms)
+
         # Additional scaling based on shape (see line 135).
         updates = jtu.tree_map(
-            lambda G: G * max(1, G.shape[0]/G.shape[1])**0.5, updates)
+            lambda G: G * max(1, G.shape[0] / G.shape[1]) ** 0.5, updates
+        )
 
         # Wrap final update.
         lr = get_current_lr(learning_rate, count)
         updates = tree_utils.scalar_dot(updates, -lr)
 
         return updates, ScaleByMuonState(
-            count = count, #optax.safe_int32_increment(count),
-            muon_momentum = muon_momentum,
+            count=count,  # optax.safe_int32_increment(count),
+            muon_momentum=muon_momentum,
             grad_squared_sum=grad_squared_sum,
         )
-    
+
     return optax.GradientTransformation(init_fn, update_fn)
 
 
 def muon(
-        learning_rate: optax.ScalarOrSchedule = 0.05,
-        momentum: float = 0.95,
-        beta2: float = 0.0,
-        postcondition: bool = False,
-        nesterov: bool = True,
-        ns_steps: int = 6,
-        adam_lr: optax.ScalarOrSchedule = 3e-4,
-        adam_beta1: float = 0.95,
-        adam_beta2: float = 0.95,
-        adam_eps: float = 1e-8,
-        adam_wd: float = 0.0,
-        label_params: LabelParamsFn | None = None
+    learning_rate: optax.ScalarOrSchedule = 0.05,
+    momentum: float = 0.95,
+    beta2: float = 0.0,
+    condition_power: float = 0.5,
+    condition_grad_power: float = 2,
+    postcondition: bool = False,
+    nesterov: bool = True,
+    ns_steps: int = 6,
+    adam_lr: optax.ScalarOrSchedule = 3e-4,
+    adam_beta1: float = 0.95,
+    adam_beta2: float = 0.95,
+    adam_eps: float = 1e-8,
+    adam_wd: float = 0.0,
+    label_params: LabelParamsFn | None = None,
 ) -> optax.GradientTransformation:
     """The muon optimizer.
-    
+
     Applies muon update on suitable parameters and
     applies adam update on the rest.
 
@@ -177,9 +213,16 @@ def muon(
         adam_wd: adam weight decay.
     """
     if label_params is None:
-        label_params = muon_label_params_default    # use default muon partition.
+        label_params = muon_label_params_default  # use default muon partition.
     optim_muon = scale_by_muon(
-        learning_rate, momentum, beta2, nesterov, ns_steps, postcondition=postcondition
+        learning_rate,
+        momentum,
+        beta2,
+        nesterov,
+        ns_steps,
+        postcondition=postcondition,
+        condition_power=condition_power,
+        condition_grad_power=condition_grad_power,
     )
     optim_adam = adamw(
         learning_rate=adam_lr,
@@ -197,28 +240,28 @@ def muon(
 
 
 def muon_og(
-        learning_rate: optax.ScalarOrSchedule = 0.05,
-        momentum: float = 0.95,
-        nesterov: bool = True,
-        ns_steps: int = 6,
-        ns_embedding: bool = False,
-        ns_head: bool = False,
-        adam_lr: optax.ScalarOrSchedule = 3e-4,
-        adam_beta1: float = 0.95,
-        adam_beta2: float = 0.95,
-        adam_eps: float = 1e-8,
-        adam_wd: float = 0.0,
+    learning_rate: optax.ScalarOrSchedule = 0.05,
+    momentum: float = 0.95,
+    nesterov: bool = True,
+    ns_steps: int = 6,
+    ns_embedding: bool = False,
+    ns_head: bool = False,
+    adam_lr: optax.ScalarOrSchedule = 3e-4,
+    adam_beta1: float = 0.95,
+    adam_beta2: float = 0.95,
+    adam_eps: float = 1e-8,
+    adam_wd: float = 0.0,
 ) -> optax.GradientTransformation:
     """The OG muon optimizer that doesn't apply newton-schulz on embedding nor head layers."""
-    warnings.warn("muon_og is deprecated. please use muon instead.",
-                  "define new label functions if necessary.")
-    
-    optim_muon = scale_by_muon(
-        learning_rate, momentum, nesterov, ns_steps
+    warnings.warn(
+        "muon_og is deprecated. please use muon instead.",
+        "define new label functions if necessary.",
     )
+
+    optim_muon = scale_by_muon(learning_rate, momentum, nesterov, ns_steps)
     optim_momentum = optax.chain(
         optax.trace(decay=momentum, nesterov=nesterov),
-        optax.scale_by_learning_rate(learning_rate)
+        optax.scale_by_learning_rate(learning_rate),
     )
     optim_adamw = adamw(
         learning_rate=adam_lr,
@@ -233,6 +276,7 @@ def muon_og(
         "momentum": optim_momentum,
         "adamw": optim_adamw,
     }
+
     def label_params(params):
         def get_layer(path, p):
             parts = [part.name for part in path if isinstance(part, jtu.GetAttrKey)]
@@ -247,6 +291,7 @@ def muon_og(
             if p.ndim == 1:
                 return "vec"
             raise ValueError(f"cannot categorize parameter: {p}")
+
         parse_table = {
             # NOTE: we change to use adamw instead of SGDM for all layers which muon is not applied
             # "embedding": "muon" if ns_embedding else "momentum",
@@ -256,8 +301,10 @@ def muon_og(
             "mat": "muon",
             "vec": "adamw",
         }
+
         def fn(path, p):
             return parse_table[get_layer(path, p)]
-        return jtu.tree_map_with_path(fn, params) 
+
+        return jtu.tree_map_with_path(fn, params)
+
     return multi_transform(transforms, label_params)
-    
