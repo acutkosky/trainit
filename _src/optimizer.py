@@ -224,6 +224,7 @@ def init_optimizer(
             beta2=config.beta2,
             p_pre=config.p_pre,
             p_post=config.p_post,
+            stabilize=config.stabilize,
             offset_beta=config.offset_beta,
         )
     

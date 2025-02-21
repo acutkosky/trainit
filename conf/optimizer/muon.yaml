@@ -18,4 +18,5 @@ adam_wd: 0.0
 beta2: 0.0
 p_pre: 0.5
 p_post: 0.0
+stabilize: ""
 offset_beta: 0.0

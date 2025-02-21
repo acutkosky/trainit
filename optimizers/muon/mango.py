@@ -102,11 +102,14 @@ def normalize_with_grad_squared(
         # arbitrary power and jnp.power(). 
         # For now, we probably could interest in sqrt(V) or V**0.25.
         bias_correction = lambda v: v / (1 - beta**count_inc)
-        stabilize_rms = lambda v: v / (jnp.linalg.norm(v, ord="fro") / (v.shape[0]*v.shape[1])**0.5)
+        stabilize_rms = lambda v: v / (jnp.linalg.norm(v, ord="fro") / (v.shape[0]*v.shape[1])**0.5 + 1e-8)
+        stabilize_mean = lambda v: jnp.mean(jnp.abs(v))
         def get_condition_fn(power, correct_bias, stabilize=""):
             def preprocess(v):
                 if stabilize == "rms":
                     v = stabilize_rms(v)
+                elif stabilize == "mean":
+                    v =stabilize_mean(v)
                 if correct_bias:
                     v = bias_correction(v)
                 return v

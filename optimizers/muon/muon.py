@@ -129,6 +129,7 @@ def muon(
         beta2: float = 0.0,
         p_pre: float = 0.5,
         p_post: float = 0.0,
+        stabilize: str = "",
         offset_beta: float = 0.0,
         ns_steps: int = 6,
         adam_lr: optax.ScalarOrSchedule = 3e-4,
@@ -176,7 +177,7 @@ def muon(
             power_pre=p_pre,
             power_post=p_post,
             correct_bias=True,
-            stabilize_postcond="rms",
+            stabilize_postcond=stabilize,
         )
         optim_muon = optax.chain(
             optim_muon,
