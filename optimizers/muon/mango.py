@@ -103,7 +103,7 @@ def normalize_with_grad_squared(
         # For now, we probably could interest in sqrt(V) or V**0.25.
         bias_correction = lambda v: v / (1 - beta**count_inc)
         stabilize_rms = lambda v: v / (jnp.linalg.norm(v, ord="fro") / (v.shape[0]*v.shape[1])**0.5)
-        def get_cond_scaling(power, correct_bias, stabilize=""):
+        def get_condition_fn(power, correct_bias, stabilize=""):
             def preprocess(v):
                 if stabilize == "rms":
                     v = stabilize_rms(v)
@@ -111,17 +111,13 @@ def normalize_with_grad_squared(
                     v = bias_correction(v)
                 return v
             if power == 0.0:
-                scale_fn = lambda v: 1
+                condition_fn = lambda u, v: u
             elif power == 0.5:
-                scale_fn = lambda u, v: u / (jnp.sqrt(preprocess(v)) + eps)
+                condition_fn = lambda u, v: u / (jnp.sqrt(preprocess(v)) + eps)
             elif power == 0.25:
-                scale_fn = lambda u, v: u / (jnp.sqrt(jnp.sqrt(preprocess(v))) + eps)
+                condition_fn = lambda u, v: u / (jnp.sqrt(jnp.sqrt(preprocess(v))) + eps)
             else:
-                scale_fn = lambda u, v: u / (jnp.power(preprocess(v), power) + eps)
-            return scale_fn
-        def get_condition_fn(**kwargs):
-            scale_fn = get_cond_scaling(**kwargs)
-            condition_fn = lambda u, v: u / scale_fn(v)
+                condition_fn = lambda u, v: u / (jnp.power(preprocess(v), power) + eps)
             return condition_fn
         precondition = get_condition_fn(power_pre, correct_bias)
         postcondition = get_condition_fn(power_post, correct_bias, stabilize_postcond)
