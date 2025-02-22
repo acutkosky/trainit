@@ -1,7 +1,7 @@
 #!/bin/bash
 # Muon baseline.
 
-optimizer=muon_p
+optimizer=muon_inverse
 
 # ========================================================================
 # Global Configs.
@@ -18,7 +18,7 @@ warmup=200
 const=null
 
 # Make scc_outputs dir.
-exp_name=muon_p
+exp_name=muon_inverse
 BASE_DIR=/projectnb/aclab/qinziz/trainit
 DATE=$(date +"%Y-%m-%d")
 OUTPUT_PATH=$BASE_DIR/scc_outputs/$DATE/$exp_name
@@ -30,25 +30,10 @@ mkdir -p $OUTPUT_PATH
 # Optimizer Configs.
 # ========================================================================
 
-# schatten_p=3
+# inverse_k=0.7
 # lrs=(0.03 0.01 3e-3 1e-3 0.1 0.3 1.0)
-# lr=${lrs[-1]}
-# name="muon_schatten-p${schatten_p}_lr${lr}"
-
-# schatten_p=2
-# lrs=(0.03 0.01 3e-3 1e-3 0.1 0.3 1.0 3.0 10.0 30.0)
-# lr=${lrs[-1]}
-# name="muon_schatten-p${schatten_p}_lr${lr}"
-
-# schatten_p=5
-# lrs=(0.03 0.01 3e-3 1e-3 0.1 0.3 1.0)
-# lr=${lrs[-1]}
-# name="muon_schatten-p${schatten_p}_lr${lr}"
-
-# schatten_p=11
-# lrs=(0.01 0.03 0.1 0.3 1.0)
-# lr=${lrs[4]}
-# name="muon_schatten-p${schatten_p}_lr${lr}"
+# lr=${lrs[5]}
+# name="muon_inverse-k${inverse_k}_lr${lr}"
 
 # ========================================================================
 # Submit function.
@@ -84,7 +69,7 @@ args=(
 optimizer_keys=(
     "momentum"
     "nesterov"
-    "schatten_p"
+    "inverse_k"
     "ns_steps"
     "adam_beta1"
     "adam_beta2"

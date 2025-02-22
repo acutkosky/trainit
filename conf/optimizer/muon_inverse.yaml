@@ -1,0 +1,18 @@
+name: muon_inverse
+defaults:
+  - lr_config: linear
+lr_config:
+  lr: 0.05
+
+adam_lr: 0.03
+
+config:
+  momentum: 0.95
+  nesterov: True
+  inverse_k: 0.7
+  ns_steps: 6
+
+  adam_beta1: 0.95
+  adam_beta2: 0.95
+  adam_eps: 1e-8
+  adam_wd: 0.0

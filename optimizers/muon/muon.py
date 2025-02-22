@@ -340,3 +340,65 @@ def muon_p(
     }
     optim = multi_transform(transforms, label_params)
     return optim
+
+
+def inverse_scale_svd(G, k=0.7):
+    """G -> U @ exp( -k*transform(S) ) @ V^T,
+    where transform(S) maps min(S) -> 0 and max(S) -> [0,1]
+    """
+    U, S, Vh = jnp.linalg.svd(G)
+
+    # Normalization w.r.t. ell-p vector norm.
+    # S = (S - jnp.min(S)) / (jnp.max(S) - jnp.min(S))
+    S = (S - jnp.min(S)) / jnp.max(S)
+    S = jnp.exp(-k*S)
+
+    # SVD on G and tranlate to diagonal matrix.
+    k = min(G.shape[0], G.shape[1])
+    S = jnp.zeros_like(G).at[jnp.arange(k), jnp.arange(k)].set(S)
+
+    return U@S@Vh
+
+
+def muon_inverse(
+        learning_rate: optax.ScalarOrSchedule = 0.05,
+        momentum: float = 0.95,
+        nesterov: bool = True,
+        inverse_k: float = 0.693,
+        ns_steps: int = 6,
+        adam_lr: optax.ScalarOrSchedule = 3e-4,
+        adam_beta1: float = 0.95,
+        adam_beta2: float = 0.95,
+        adam_eps: float = 1e-8,
+        adam_wd: float = 0.0,
+        label_params: LabelParamsFn | None = None
+) -> optax.GradientTransformation:
+    """Muon with newton-schulz replaced with normalization
+    w.r.t. Schatten-p norm. p=inf recovers muon, and p=2 recovers normalized by frobenius norm.
+    """
+    if label_params is None:
+        label_params = muon_label_params_default    # use default muon partition.
+        
+    def normalize(G):
+        G = inverse_scale_svd(G, inverse_k)
+        G = G * max(1, G.shape[0]/G.shape[1])**0.5
+        return G
+    optim_muon = optax.chain(
+        optax.trace(decay=momentum, nesterov=nesterov),
+        scale_by_function(normalize),
+        optax.scale_by_learning_rate(learning_rate),
+    )
+    optim_adam = adamw(
+        learning_rate=adam_lr,
+        beta1=adam_beta1,
+        beta2=adam_beta2,
+        eps=adam_eps,
+        weight_decay=adam_wd,
+        use_nesterov=False,
+    )
+    transforms = {
+        "muon": optim_muon,
+        "adamw": optim_adam,
+    }
+    optim = multi_transform(transforms, label_params)
+    return optim

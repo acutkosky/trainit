@@ -28,6 +28,7 @@ from optimizers.muon.muon import (
     muon,
     muon_og,
     muon_p,
+    muon_inverse,
 )
 from optimizers.muon.muon_laprop import (
     muon_laprop,
