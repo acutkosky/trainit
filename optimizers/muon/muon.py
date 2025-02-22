@@ -288,7 +288,8 @@ def general_newton_schulz(G, p):
     # Normalization w.r.t. ell-p vector norm.
     q = p / (p-1)
     ratio = 1 / (p-1)
-    S = (S / jnp.linalg.norm(S, ord=1)) ** ratio
+    S = (S / jnp.linalg.norm(S, ord=q)) ** ratio
+    # NOTE: fix to ord=q
 
     # SVD on G and tranlate to diagonal matrix.
     k = min(G.shape[0], G.shape[1])
