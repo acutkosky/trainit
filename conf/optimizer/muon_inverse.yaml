@@ -10,6 +10,7 @@ config:
   momentum: 0.95
   nesterov: True
   inverse_k: 0.7
+  scale_rms: False
   ns_steps: 6
 
   adam_beta1: 0.95

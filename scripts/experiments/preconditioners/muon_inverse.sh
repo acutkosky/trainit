@@ -35,6 +35,27 @@ mkdir -p $OUTPUT_PATH
 # lr=${lrs[5]}
 # name="muon_inverse-k${inverse_k}_lr${lr}"
 
+# inverse_k=1.4
+# lrs=(0.03 0.01 0.1)
+# lr=${lrs[2]}
+# name="muon_inverse-k${inverse_k}_lr${lr}"
+
+# inverse_k=2.3
+# lrs=(0.03 0.01 0.1)
+# lr=${lrs[2]}
+# name="muon_inverse-k${inverse_k}_lr${lr}"
+
+# inverse_k=4.6
+# lrs=(0.03 0.01 0.1)
+# lr=${lrs[2]}
+# name="muon_inverse-k${inverse_k}_lr${lr}"
+
+# scale_rms=True
+# ks=(0.7 1.4 2.3 4.6)
+# inverse_k=${ks[3]}
+# lr=0.03
+# name="muonrms_inverse-k${inverse_k}_lr${lr}"
+
 # ========================================================================
 # Submit function.
 # ========================================================================
@@ -70,6 +91,7 @@ optimizer_keys=(
     "momentum"
     "nesterov"
     "inverse_k"
+    "scale_rms"
     "ns_steps"
     "adam_beta1"
     "adam_beta2"

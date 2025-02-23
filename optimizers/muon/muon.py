@@ -366,6 +366,7 @@ def muon_inverse(
         nesterov: bool = True,
         inverse_k: float = 0.693,
         ns_steps: int = 6,
+        scale_rms: bool = False,
         adam_lr: optax.ScalarOrSchedule = 3e-4,
         adam_beta1: float = 0.95,
         adam_beta2: float = 0.95,
@@ -381,7 +382,12 @@ def muon_inverse(
         
     def normalize(G):
         G = inverse_scale_svd(G, inverse_k)
-        G = G * max(1, G.shape[0]/G.shape[1])**0.5
+        if scale_rms:
+            # explicit RMS normalization
+            G = G * (G.shape[0]*G.shape[1])**0.5 / jnp.linalg.norm(G)
+        else:
+            # default muon scaling
+            G = G * max(1, G.shape[0]/G.shape[1])**0.5
         return G
     optim_muon = optax.chain(
         optax.trace(decay=momentum, nesterov=nesterov),
